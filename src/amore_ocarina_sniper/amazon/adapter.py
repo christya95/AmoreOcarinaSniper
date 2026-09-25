@@ -42,7 +42,7 @@ class PurchaseAdapter(Protocol):
     async def submit_order(self) -> None: ...
     async def confirm_order(self) -> str | None: ...
     async def abandon(self) -> None: ...
-    async def capture_artifact(self, label: str) -> str | None: ...
+    async def capture_artifact(self, label: str, *, html: bool = False) -> str | None: ...
 
 
 _HEAVY_TYPES = {"image", "font", "media"}
@@ -115,14 +115,30 @@ class AmazonAdapter:
         if kind:
             raise ChallengeDetected(ChallengeKind(kind), raw.get("url", ""))
 
-    async def capture_artifact(self, label: str) -> str | None:
-        """Screenshot for operator review. Never on the critical path."""
+    async def capture_artifact(self, label: str, *, html: bool = False) -> str | None:
+        """Screenshot (and optionally DOM of every frame) for operator review.
+
+        Never on the critical path: called only after an attempt has already been
+        rejected or has raised. The HTML dump exists so a selector that failed on a
+        live page can be fixed offline; it stays under data_dir/artifacts (gitignored).
+        """
         try:
             out_dir = self.config.paths.artifacts_dir
             out_dir.mkdir(parents=True, exist_ok=True)
-            path = out_dir / f"{int(time.time())}-{label}.png"
-            await self.page.screenshot(path=str(path), full_page=False)
-            return str(path)
+            stem = out_dir / f"{int(time.time())}-{label}"
+            await self.page.screenshot(path=f"{stem}.png", full_page=True)
+            if html:
+                parts = []
+                for frame in self.page.frames:
+                    try:
+                        content = await frame.content()
+                    except Exception as exc:  # noqa: BLE001 - cross-origin/detached frames
+                        content = f"<!-- frame content unavailable: {exc!r} -->"
+                    parts.append(f"<!-- ===== frame url={frame.url} name={frame.name!r} ===== -->\n{content}")
+                await asyncio.to_thread(
+                    Path(f"{stem}.html").write_text, "\n\n".join(parts), encoding="utf-8"
+                )
+            return f"{stem}.png"
         except Exception as exc:  # pragma: no cover
             log.warning("artifact capture failed: %s", exc)
             return None

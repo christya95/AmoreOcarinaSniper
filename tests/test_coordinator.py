@@ -65,7 +65,8 @@ class FakeAdapter:
     async def abandon(self):
         self.calls.append("abandon")
 
-    async def capture_artifact(self, label):
+    async def capture_artifact(self, label, *, html=False):
+        self.calls.append(f"capture_artifact:{label}")
         return None
 
 
@@ -161,7 +162,8 @@ async def test_checkout_rejected_abandons_without_submit(live):
     arm(store)
     out = await coord.handle_trigger(event())
     assert out.final_state == PurchaseState.ARMED and "2 line items" in out.reason
-    assert adapter.calls == ["verify_offer", "prepare_checkout", "abandon"]
+    # Evidence is captured while still on the review page, i.e. before abandon() navigates away.
+    assert adapter.calls == ["verify_offer", "prepare_checkout", "capture_artifact:checkout-rejected", "abandon"]
 
 
 async def test_captcha_before_intent_needs_attention(live):

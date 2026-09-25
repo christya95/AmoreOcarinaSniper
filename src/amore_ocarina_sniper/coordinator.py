@@ -10,6 +10,7 @@ exactly-once; it makes "we clicked twice" impossible and "we do not know" explic
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict
 from pathlib import Path
 
 from . import killswitch
@@ -133,6 +134,14 @@ class PurchaseCoordinator:
                 in_stock=offer.in_stock,
             )
             if not decision.ok:
+                if offer.in_stock:
+                    # The interesting case: stock was there and we still refused. Keep the
+                    # evidence (off the critical path; the attempt is already over).
+                    artifact = await self.adapter.capture_artifact("offer-rejected", html=True)
+                    self.telemetry.emit(
+                        "offer_rejected_in_stock", event_id=eid, reasons=decision.reasons,
+                        offer=asdict(offer), artifact=artifact,
+                    )
                 return self._finish_pre_intent(
                     eid, "offer rejected: " + "; ".join(decision.reasons), benign=True
                 )
@@ -146,8 +155,14 @@ class PurchaseCoordinator:
                 ok=decision.ok,
                 reasons=decision.reasons,
                 total=str(snapshot.total),
+                snapshot=asdict(snapshot),
             )
             if not decision.ok:
+                # Capture BEFORE abandon() navigates away from the review page.
+                artifact = await self.adapter.capture_artifact("checkout-rejected", html=True)
+                self.telemetry.emit(
+                    "checkout_rejected", event_id=eid, reasons=decision.reasons, artifact=artifact
+                )
                 await self._abandon()
                 return self._finish_pre_intent(
                     eid, "checkout rejected: " + "; ".join(decision.reasons), benign=True

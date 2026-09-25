@@ -116,10 +116,15 @@ Confirm assumptions against real pages without submitting anything.
 - [x] Dry-run soak (2026-09-24): `ocarina run` + `arm --minutes 30` + `trigger` → accepted,
   `ARMED -> VERIFYING -> ARMED` in 2 s, rejected on *not in stock*. Policy config passes `arm`.
 
-### M4 — Armed operation `[ ]`
-Gate: every M2 checkout item is verified and M3 is complete.
+### M4 — Armed operation `[~]`
+Gate: every M2 checkout item is verified and M3 is complete. **Operator chose to go live early**
+(2026-09-24 23:15) accepting that unverified checkout selectors most likely fail closed (missed
+drop) rather than mis-purchase; the run doubles as the checkout probe. See Decision log.
 
-- [ ] `ocarina run --live` with a short `arm --minutes` window on a real in-stock event.
+- [~] `ocarina run --live` in a standalone pwsh window, armed 720 min until 2026-09-25 11:15.
+  Console log mirrored to `runtime/logs/runner.log`; `telemetry.verbose = true` for this run.
+  On any rejection with stock present, full-page screenshot + all-frame HTML land in
+  `runtime/artifacts/` and the full snapshot dict in `telemetry.jsonl`.
 - [ ] Confirm the `PURCHASED` transition disables further purchases; `ocarina reconcile`
   matches order history.
 - [ ] Record real end-to-end latency points from `runtime/logs/telemetry.jsonl` and replace the
@@ -166,6 +171,16 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
 - [x] `a202ee8` Project brief and implementation prompt.
 
 ## Decision log
+
+- 2026-09-24 23:15 — **Live before checkout probe**, operator's call. Rationale: item is
+  *Currently unavailable*; the first restock is the only chance to observe the real review page,
+  and fail-closed policy checks make a wrong purchase far less likely than a missed one. Added
+  evidence capture (screenshot + HTML + snapshot dict) on offer/checkout rejection so a miss is
+  fixable. `ocarina kill` is the emergency stop. Revert to dry-run (`ocarina run` without
+  `--live`) if anything looks off.
+- 2026-09-24 — `ocarina run` now always mirrors its log to `data_dir/logs/runner.log`;
+  PowerShell `Tee-Object` piping from a `Start-Process` window did not flush for a long-running
+  native process.
 
 - 2026-09-24 — Buy Now is the default checkout strategy; `cart` is the fallback. Revisit after
   the first live checkout probe.

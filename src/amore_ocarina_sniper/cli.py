@@ -158,6 +158,16 @@ def cmd_run(args) -> int:
     from .app import run_forever
 
     dry_run = not args.live
+    # The runner is the unattended, always-on process: mirror its console log to a file so
+    # an overnight attempt can be reviewed regardless of how the terminal was launched.
+    log_path = cfg.paths.log_dir / "runner.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(log_path, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logging.getLogger().addHandler(handler)
+    logging.getLogger("ocarina.cli").info(
+        "runner log: %s (mode=%s)", log_path, "LIVE" if args.live else "dry-run"
+    )
     try:
         return asyncio.run(run_forever(cfg, dry_run=dry_run, headless=args.headless))
     except KeyboardInterrupt:
