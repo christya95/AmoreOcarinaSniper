@@ -161,8 +161,10 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
 - (none)
 
 ### Done
-- [x] Discord selectors live-verified; sender-name badge fix; popup *Last skip*; 3 new tests
-  (167 total).
+- [x] `4315184` Popup pulls tab status on open (fixes *no status yet* after MV3 worker
+  suspension). 168 tests.
+- [x] `969608b` Evidence capture on rejection; runner always logs to `runtime/logs/runner.log`.
+- [x] Discord selectors live-verified; sender-name badge fix; popup *Last skip*; 3 new tests.
 - [x] `ocarina doctor --browser` on host: signed in, no challenge, title parsed, unavailable.
 - [x] `75aebe3` README: commands, extension install, Windows deployment, verification and
   blocker report; relax test line-length lint.
