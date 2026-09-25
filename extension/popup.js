@@ -48,6 +48,9 @@
     } else {
       setText("last", "none");
     }
+    // Most recent fail-closed reason from the content script (stale, no timestamp,
+    // sender not identifiable, ...). Without this, skipped alerts are invisible.
+    setText("skip", (st && st.lastSkip) || "none", st && st.lastSkip ? "warn" : "");
     $("pause").textContent = s.paused ? "Resume" : "Pause";
     $("pause").dataset.paused = s.paused ? "1" : "0";
   }

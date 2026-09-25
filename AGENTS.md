@@ -87,9 +87,14 @@ Extension → bridge → coordinator → Amazon adapter, state machine, durable 
 Confirm assumptions against real pages without submitting anything.
 
 - [x] Amazon.ca product page selectors, signed out (2026-09-24; listing was *Currently unavailable*).
-- [ ] Amazon.ca product page while **signed in** (`ocarina doctor --browser` shows `signed_in=True`).
-- [!] Discord live DOM: `li#chat-messages-*`, `#message-content-*`, `#message-accessories-*`,
-  `time#message-timestamp-*[datetime]` — needs a Discord session on the target channel.
+- [x] Amazon.ca product page while **signed in** (2026-09-24: `signed_in=True`, `challenge=None`,
+  title parsed; listing still *Currently unavailable* so price/seller/buy box not yet observed).
+- [x] Discord live DOM (2026-09-24, Comet, DevTools on a real Lbabinz alert): list,
+  `li#chat-messages-*`, `#message-content-*`, `#message-accessories-*`, `time[datetime]`,
+  embed title/description, username header (`data-text` + `APP` botTag) all verified.
+  Finding: the alert app uses a **default avatar** → no user id in the DOM → *Sender user id*
+  must stay empty for this author (fails closed otherwise). Fixed name matching to strip the
+  badge; added sticky *Last skip* row to the popup.
 - [!] Checkout review page (`CHECKOUT_PAGE` selectors, turbo-checkout iframe, confirmation
   markers, order-id pattern) via `ocarina doctor --browser --checkout-probe` — needs signed-in
   session **and** the item in stock.
@@ -98,14 +103,16 @@ Confirm assumptions against real pages without submitting anything.
   `checkout.strategy` to `"cart"` and document the unrelated-cart-items caveat.
 
 ### M3 — Always-on Windows deployment `[ ]`
-- [ ] `ocarina pair` / `ocarina setup` completed on the host; Amazon signed in with saved
-  address + payment.
-- [ ] Extension loaded unpacked, options saved, *Test bridge* green, popup shows *monitoring*.
-- [ ] `allowed_extension_origin` pinned in `config.toml`.
+- [x] `ocarina pair` / `ocarina setup` completed on the host (2026-09-24); Amazon signed in.
+  Saved address + payment still to be confirmed via the checkout probe.
+- [x] Extension loaded unpacked in Comet (Chromium), options saved incl. sender user id
+  (2026-09-24). Popup: bridge *connected*, Python *ARMED · dry-run*, *correct channel*,
+  *monitoring*. (Tab had to be reloaded after Load unpacked for the content script to inject.)
+- [x] `allowed_extension_origin` pinned in `config.toml`; `target.discord_channel_id` pinned.
 - [ ] Sleep/Memory Saver disabled; runner started via Scheduled Task or persistent terminal.
 - [ ] Remote access (RDP/VNC/Tailscale) into the same browser profile confirmed for challenges.
-- [ ] Dry-run soak: `ocarina run` + `ocarina arm` + `ocarina trigger` stops at the offer check;
-  `ocarina status --transitions` is readable.
+- [x] Dry-run soak (2026-09-24): `ocarina run` + `arm --minutes 30` + `trigger` → accepted,
+  `ARMED -> VERIFYING -> ARMED` in 2 s, rejected on *not in stock*. Policy config passes `arm`.
 
 ### M4 — Armed operation `[ ]`
 Gate: every M2 checkout item is verified and M3 is complete.
@@ -136,16 +143,19 @@ Gate: every M2 checkout item is verified and M3 is complete.
 Add new items at the top of *Next up*. Move to *Done* with the commit hash.
 
 ### Next up
-- [ ] Run `ocarina doctor --browser` on the deployment host once signed in; paste the
-  selector table result into M2.
-- [ ] Run the Discord DOM check snippets from `README.md` in DevTools on the target channel;
-  fix `extension/content/selectors.js` if either returns `undefined`.
+- [ ] Operator: clear *Sender user id* in extension Options, reload extension + Discord tab,
+  confirm popup still *monitoring* and *Last skip* = none.
+- [ ] Wait for the next real Lbabinz alert in dry-run; confirm popup *Last match* updates and
+  `ocarina status` shows an accepted event (expected to stop at *not in stock* unless restocked).
 - [ ] Decide `checkout.strategy` default after the first `--checkout-probe`.
 
 ### In progress
 - (none)
 
 ### Done
+- [x] Discord selectors live-verified; sender-name badge fix; popup *Last skip*; 3 new tests
+  (167 total).
+- [x] `ocarina doctor --browser` on host: signed in, no challenge, title parsed, unavailable.
 - [x] `75aebe3` README: commands, extension install, Windows deployment, verification and
   blocker report; relax test line-length lint.
 - [x] `e372196` Python purchase coordinator, localhost trigger bridge, MV3 Discord watcher

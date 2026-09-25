@@ -28,7 +28,7 @@
         function snowflakeFor(ms, seq) {
           return String(((BigInt(ms) - EPOCH) << 22n) | BigInt(seq || 1));
         }
-        function messageEl({ channelId, messageId, tsMs, content, author, userId, embed, sending }) {
+        function messageEl({ channelId, messageId, tsMs, content, author, userId, embed, sending, bot }) {
           const li = document.createElement("li");
           li.id = `chat-messages-${channelId}-${messageId}`;
           li.className = "messageListItem_abc";
@@ -46,11 +46,30 @@
               img.src = `https://cdn.discordapp.com/avatars/${userId}/abcdef.webp?size=80`;
               article.appendChild(img);
             }
+            // Mirrors live Discord (verified 2026-09-24): outer header span carries the
+            // message-username-<id> id; the display name sits in an inner span with
+            // data-text; app/bot authors get a sibling botTag badge whose text is "APP".
+            const header = document.createElement("span");
+            header.id = `message-username-${messageId}`;
+            header.className = "headerText_abc" + (bot ? " hasBadges_abc" : "");
             const name = document.createElement("span");
-            name.id = `message-username-${messageId}`;
-            name.className = "username_abc";
+            name.className = "username_abc clickable_abc";
+            name.setAttribute("data-text", author);
+            name.setAttribute("role", "button");
             name.textContent = author;
-            h3.appendChild(name);
+            header.appendChild(name);
+            if (bot) {
+              const tag = document.createElement("span");
+              tag.className = "botTagCozy_abc botTagRegular_xyz botTag_xyz";
+              tag.setAttribute("role", "img");
+              tag.setAttribute("aria-label", "App");
+              const tagText = document.createElement("span");
+              tagText.className = "botText_xyz";
+              tagText.textContent = "APP";
+              tag.appendChild(tagText);
+              header.appendChild(tag);
+            }
+            h3.appendChild(header);
             if (tsMs != null) {
               const t = document.createElement("time");
               t.id = `message-timestamp-${messageId}`;

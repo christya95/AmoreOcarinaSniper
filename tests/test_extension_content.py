@@ -64,18 +64,20 @@ class Harness:
         await self.page.evaluate(f"new Promise(r => setTimeout(r, {ms}))")
 
     async def add(self, *, offset_ms: int = 0, content: str = ALERT, channel: str = CHANNEL_ID,
-                  author="Alert Bot", user_id=None, embed=None, ts=True, seq=1, message_id=None) -> str:
+                  author="Alert Bot", user_id=None, embed=None, ts=True, seq=1, message_id=None,
+                  bot=False) -> str:
         js = """
-        ({offset, content, channel, author, userId, embed, ts, seq, messageId}) => {
+        ({offset, content, channel, author, userId, embed, ts, seq, messageId, bot}) => {
           const now = Date.now() + offset;
           const id = messageId || __fx.snowflakeFor(now, seq);
           __fx.addMessage({ channelId: channel, messageId: id, tsMs: ts ? now : null,
-                            content, author, userId, embed });
+                            content, author, userId, embed, bot });
           return id;
         }"""
         mid = await self.page.evaluate(js, {
             "offset": offset_ms, "content": content, "channel": channel, "author": author,
             "userId": user_id, "embed": embed, "ts": ts, "seq": seq, "messageId": message_id,
+            "bot": bot,
         })
         await self.tick()
         return mid
@@ -226,6 +228,47 @@ async def test_sender_user_id_gate(harness):
     await harness.add(seq=10, user_id="111111111111111119")  # different user
     assert await harness.candidates() == []
     mid = await harness.add(seq=11, user_id="987654321098765432")
+    assert [c["message_id"] for c in await harness.candidates()] == [mid]
+
+
+async def test_sender_user_id_gate_fails_closed_for_default_avatar_app(harness):
+    # Live-observed 2026-09-24: the alert app uses Discord's default avatar (/assets/<hash>.png),
+    # so no user id exists anywhere in the message DOM even though an avatar IS shown.
+    await harness.inject_scripts()
+    await harness.page.evaluate(
+        "cfg => window.__listeners.forEach(fn => fn({type: 'config-updated', config: cfg}))",
+        default_cfg(senderUserId="755174187349442640", senderName="Lbabinz"),
+    )
+    await harness.tick()
+    await harness.add(seq=14, author="Lbabinz", bot=True)
+    assert await harness.candidates() == []
+    st = (await harness.statuses())[-1]
+    assert "sender user id not visible" in st["lastSkip"]
+    assert "Sender user id" in st["lastSkip"]  # actionable: tells the operator what to change
+    # The skip reason is sticky across the periodic status refresh.
+    await harness.tick(700)
+    assert "sender user id not visible" in (await harness.statuses())[-1]["lastSkip"]
+
+
+async def test_sender_name_matches_despite_app_badge(harness):
+    # Live Discord renders <span id=message-username-…><span data-text="Lbabinz">Lbabinz</span>
+    # <span class=botTag…>APP</span></span>; header.textContent is "LbabinzAPP".
+    await harness.inject_scripts()
+    await harness.page.evaluate(
+        "cfg => window.__listeners.forEach(fn => fn({type: 'config-updated', config: cfg}))",
+        default_cfg(senderName="Lbabinz"),
+    )
+    await harness.tick()
+    header_text = await harness.page.evaluate(
+        "ch => { __fx.addMessage({channelId: ch, messageId: __fx.snowflakeFor(Date.now(), 15), tsMs: Date.now(),"
+        " content: 'probe', author: 'Lbabinz', bot: true}); return document.querySelector('[id^=\"message-username-\"]').textContent; }",
+        CHANNEL_ID,
+    )
+    assert header_text == "LbabinzAPP"
+    await harness.add(seq=16, author="Someone Else", bot=True)  # wrong author
+    await harness.add(seq=17, author="LbabinzAPP", bot=False)  # impersonation via name text, no badge
+    assert await harness.candidates() == []
+    mid = await harness.add(seq=18, author="Lbabinz", bot=True)
     assert [c["message_id"] for c in await harness.candidates()] == [mid]
 
 

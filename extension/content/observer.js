@@ -23,6 +23,7 @@
     tracked: new Map(), // messageId -> { baseline, triggered, matched }
     baselineMaxSnowflake: null,
     lastStatus: null,
+    lastSkip: null,
     dead: false,
     routeTimer: null,
     bodyObserver: null,
@@ -52,8 +53,12 @@
   }
 
   function reportStatus(extra) {
+    // Skip reasons are sticky so the popup can show why the last candidate was dropped;
+    // a plain reportStatus() 500 ms later must not erase them.
+    if (extra && extra.lastSkip) state.lastSkip = `${new Date().toLocaleTimeString()} ${extra.lastSkip}`;
     const onChannel = isOnConfiguredChannel();
     const status = {
+      lastSkip: state.lastSkip,
       type: "tab-status",
       route: state.route,
       onChannel,
@@ -222,8 +227,21 @@
     return Number.isFinite(ms) ? ms : null;
   }
 
+  function readSenderName(li) {
+    const header = li.querySelector(SEL.username);
+    if (!header) return null;
+    // Live Discord: <span id="message-username-…"><span class="username_…" data-text="Name">Name</span>
+    // <span class="botTag…">APP</span></span>. header.textContent would read "NameAPP".
+    const inner = header.querySelector(SEL.usernameInner);
+    const dataText = (inner || header).getAttribute("data-text");
+    if (dataText && dataText.trim()) return dataText.trim();
+    const clone = (inner || header).cloneNode(true);
+    clone.querySelectorAll(SEL.botTag).forEach((n) => n.remove());
+    const text = (clone.textContent || "").trim();
+    return text || null;
+  }
+
   function readSender(li) {
-    const nameEl = li.querySelector(SEL.username);
     const avatar = li.querySelector(SEL.avatar);
     let userId = null;
     if (avatar) {
@@ -231,7 +249,7 @@
       if (m) userId = m[1];
     }
     return {
-      name: nameEl ? (nameEl.textContent || "").trim() : null,
+      name: readSenderName(li),
       userId,
       isBot: !!li.querySelector(SEL.botTag),
     };
@@ -284,7 +302,10 @@
     const sender = readSender(li);
     if (state.config.senderUserId) {
       if (!sender.userId) {
-        reportStatus({ lastSkip: "sender user id not visible on this message; failing closed" });
+        reportStatus({
+          lastSkip: "sender user id not visible (default-avatar app or grouped message); "
+            + "failing closed — clear 'Sender user id' in Options to rely on display name",
+        });
         return;
       }
       if (sender.userId !== state.config.senderUserId) return;

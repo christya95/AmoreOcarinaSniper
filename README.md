@@ -118,20 +118,27 @@ Use `--config path\to\config.toml` or `OCARINA_CONFIG` to point at a different f
 The extension only sends `event_id`, `message_id`, `channel_id`, `guild_id`, `matched_target`,
 `message_ts_ms`, `sent_at_ms`, `detected_at_offset_ms`, `attempt`, `source`. No chat text.
 
-### Discord DOM check (do this once before arming)
+### Discord DOM check
 
-Discord's DOM was **not** live-verified in this environment (no session). The selectors rely on
-Discord's stable accessibility ids (`li#chat-messages-<channel>-<message>`,
-`#message-content-<id>`, `#message-accessories-<id>`, `time#message-timestamp-<id>[datetime]`),
-centralized in `extension/content/selectors.js`. Verify in DevTools on the target channel:
+Live-verified 2026-09-24 on the target channel (Chromium/Comet), against a real alert from the
+configured app: `ol[data-list-id="chat-messages"]`, `li#chat-messages-<channel>-<message>`,
+`#message-content-<id>`, `#message-accessories-<id>`, `time[datetime]`, embed title/description,
+and `span#message-username-<id>` containing `span.username_*[data-text]` plus a `span.botTag*`
+badge whose text is `APP`. Selectors are centralized in `extension/content/selectors.js`. If
+Discord changes its DOM later, re-run in DevTools on the channel:
 
 ```js
 document.querySelector('ol[data-list-id="chat-messages"] li[id^="chat-messages-"]')?.id
 document.querySelector('li[id^="chat-messages-"] time[datetime]')?.getAttribute('datetime')
 ```
 
-If either is `undefined`, adjust `selectors.js` before use. Then post nothing — just watch the
-popup's *Last match* update when a real alert arrives while the runner is in dry-run.
+**Sender user id caveat.** The optional *Sender user id* is read from the avatar image URL
+(`/avatars/<id>/…`). Authors with Discord's **default** avatar render `/assets/<hash>.png` and
+expose no user id anywhere in the message DOM; the alert app in the target channel is one of
+them. With a user id configured, every such message fails closed and is dropped. Leave the field
+empty for these authors and rely on *Sender display name* (the target channel is read-only, so
+only moderators and their apps can post). The popup's *Last skip* row shows the most recent
+fail-closed reason so silent drops are visible.
 
 ## Recommended bring-up sequence
 
@@ -179,7 +186,7 @@ purchase latency has been measured; none is promised.
 ## Tests
 
 ```powershell
-python -m pytest -q          # 165 tests, ~75 s (headless Chromium for fixture-driven tests)
+python -m pytest -q          # 167 tests, ~75 s (headless Chromium for fixture-driven tests)
 ruff check src tests
 ```
 
@@ -216,7 +223,11 @@ and in stock):** every checkout review-page selector in `amazon/selectors.py`
 (`CHECKOUT_PAGE`), the turbo-checkout iframe, the confirmation page markers and order-id
 pattern, order-history layout, MFA selectors. `ocarina doctor` prints the table.
 
-**Not verified at all:** Discord's live DOM (see *Discord DOM check*), Amazon-as-seller display
+**Live-verified (discord.com, target channel, 2026-09-24):** message list, message/content/
+accessories ids, `time[datetime]`, embed text, username header + `data-text` + `APP` badge. The
+sender *user id* is confirmed **absent** from the DOM for the alert app (default avatar).
+
+**Not verified at all:** Amazon-as-seller display
 text (`Amazon.ca` vs `Amazon`; both are accepted via aliases), whether Buy Now on this listing
 shows all policy fields (if not, switch `checkout.strategy = "cart"` — with the caveat that any
 unrelated cart items make the attempt fail closed by design; the tool never edits your cart).

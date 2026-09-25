@@ -36,8 +36,11 @@
 
     <label>Sender display name (optional)<input id="senderName" /></label>
     <label>Sender user id (optional, stronger)<input id="senderUserId" placeholder="digits from the avatar URL" /></label>
-    <div class="hint">A display name alone does not prove identity. If a user id is set, messages that do not show
-      an avatar (grouped messages) fail closed and are not forwarded.</div>
+    <div class="hint">A display name alone does not prove identity. The user id is read from the avatar image URL,
+      so it is only usable when the author has a <em>custom</em> avatar. Apps/users with Discord's default avatar
+      (e.g. Lbabinz, verified 2026-09-24) expose no id in the DOM: with a user id set, every one of their
+      messages fails closed and is never forwarded. Grouped messages (no avatar shown) fail closed too.
+      Leave this empty for such authors and use the display name plus a read-only channel instead.</div>
 
     <button id="save">Save</button>
     <button id="test">Test bridge</button>
