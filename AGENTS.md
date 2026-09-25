@@ -132,8 +132,9 @@ drop) rather than mis-purchase; the run doubles as the checkout probe. See Decis
   synthetic ≈3 s figure in `README.md`.
 
 ### M5 — Hardening / nice-to-have `[ ]`
-- [ ] Benchmark `checkout.block_heavy_assets = true` with `doctor --browser`; keep only if it
-  helps and does not break checkout.
+- [x] Benchmark `checkout.block_heavy_assets` (2026-09-25, headless, throwaway signed-out
+ profile, 4×4 alternating runs): median 1.28–1.36 s off vs 1.32–1.33 s on — no gain, because
+ `verify_offer` already stops at `domcontentloaded`. Leave it `false`.
 - [ ] Popup: surface *list not found* / selector drift more loudly.
 - [ ] Optional operator notification (off the critical path) on `NEEDS_ATTENTION` / `UNKNOWN`.
 - [ ] CI: run `ruff` + non-browser tests on push.
