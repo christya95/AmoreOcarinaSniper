@@ -1,0 +1,88 @@
+<!doctype html>
+<!--
+  Amazon-like order review fixture. Variants via ?fixture=<name>:
+    checkout_review      one line item, all fields readable, total 802.29
+    two_items            an unrelated cart item is present as well
+    wrong_address        address does not contain the approved fragment
+    wrong_payment        payment method is a different card
+    unreadable_total     grand total element missing
+    over_total           total exceeds max_total
+    third_party_seller   sold by a marketplace seller
+    qty_two              quantity 2
+    payment_challenge    Place order shows a payment verification prompt (no navigation)
+    ambiguous            Place order navigates to a page with no confirmation
+  The selectors used here are the ASSUMED checkout selectors from selectors.py; they are
+  not live-verified. See README.
+-->
+<html><head><meta charset="utf-8"><title>Place Your Order - Amazon.ca Checkout</title></head>
+<body>
+<div id="nav-link-accountList"><span>Hello, Josua</span></div>
+<div id="checkout">
+  <div id="shipToAddressBlock" class="displayAddressDiv">
+    <span class="displayAddressFullName">Josua Example</span>
+    <span class="displayAddressAddressLine1" id="addr-line">123 Maple Street</span>
+    <span class="displayAddressCityStateOrRegionPostalCode">Milton, ON L9E 1A1</span>
+  </div>
+  <div id="payment-information"><span id="pay-line">Visa ending in 4242</span></div>
+  <div id="spc-orders">
+    <div class="item-row" data-asin="B0HJ6F8L6V" data-quantity="1" id="item-1">
+      <span class="a-text-bold lineitem-title-text">Nintendo Switch™ 2 – The Legend of Zelda™ – 40th Anniversary Edition</span>
+      <span class="a-color-price lineitem-price-text" id="item-price">$709.99</span>
+      <span class="quantity-display" id="item-qty">Quantity: 1</span>
+      <span class="a-size-small lineitem-soldby" id="item-seller">Sold by: Amazon.ca</span>
+      <span class="a-size-small lineitem-shipsfrom">Ships from: Amazon</span>
+      <span class="a-size-small lineitem-condition">Condition: New</span>
+    </div>
+  </div>
+  <table id="subtotals-marketplace-table">
+    <tr><td>Items:</td><td class="a-text-right">$709.99</td></tr>
+    <tr><td>Shipping &amp; handling:</td><td class="a-text-right">$0.00</td></tr>
+    <tr><td>Estimated tax:</td><td class="a-text-right">$92.30</td></tr>
+    <tr id="total-row"><td class="a-text-bold">Order total:</td><td class="a-text-right grand-total-price a-text-bold" id="grand-total">$802.29</td></tr>
+  </table>
+  <div id="submitOrderButtonId" class="a-button"><input name="placeYourOrder1" type="submit" value="Place your order" class="a-button-input"></div>
+  <div id="challenge" style="display:none"></div>
+</div>
+<script>
+  (function () {
+    const variant = new URLSearchParams(location.search).get('fixture') || 'checkout_review';
+    const q = (s) => document.querySelector(s);
+    if (variant === 'two_items') {
+      const extra = q('#item-1').cloneNode(true);
+      extra.id = 'item-2';
+      extra.setAttribute('data-asin', 'B0EXTRA0001');
+      extra.querySelector('.lineitem-title-text').textContent = 'USB-C Cable 2m';
+      extra.querySelector('.lineitem-price-text').textContent = '$12.99';
+      q('#spc-orders').appendChild(extra);
+      q('#grand-total').textContent = '$816.97';
+    } else if (variant === 'wrong_address') {
+      q('#addr-line').textContent = '9 Other Road';
+    } else if (variant === 'wrong_payment') {
+      q('#pay-line').textContent = 'Mastercard ending in 9999';
+    } else if (variant === 'unreadable_total') {
+      q('#total-row').remove();
+    } else if (variant === 'over_total') {
+      q('#grand-total').textContent = '$1,002.29';
+    } else if (variant === 'third_party_seller') {
+      q('#item-seller').textContent = 'Sold by: Reseller Depot';
+    } else if (variant === 'qty_two') {
+      q('#item-qty').textContent = 'Quantity: 2';
+      q('#item-1').setAttribute('data-quantity', '2');
+    }
+    q('input[name="placeYourOrder1"]').addEventListener('click', function (e) {
+      e.preventDefault();
+      if (variant === 'payment_challenge') {
+        const c = q('#challenge');
+        c.style.display = 'block';
+        c.textContent = 'There was a problem with your payment. Please verify your card to continue.';
+        return;
+      }
+      if (variant === 'ambiguous') {
+        location.href = '/gp/buy/spc/handlers/static.html';
+        return;
+      }
+      location.href = '/gp/buy/thankyou/handlers/display.html';
+    });
+  })();
+</script>
+</body></html>

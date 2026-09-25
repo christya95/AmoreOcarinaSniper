@@ -1,0 +1,48 @@
+<!doctype html>
+<!-- Modelled on the live amazon.ca desktop buy box observed 2026-09-24 (ids verified). -->
+<html><head><meta charset="utf-8"><title>Nintendo Switch™ 2 – The Legend of Zelda™ – 40th Anniversary Edition : Amazon.ca</title></head>
+<body>
+<div id="nav-link-accountList"><span>Hello, Josua</span><span>Account &amp; Lists</span></div>
+<form id="addToCart" method="post" action="/gp/product/handle-buy-box/ref=dp_start-bbf_1_glance">
+  <input type="hidden" id="ASIN" name="ASIN" value="B0HJ6F8L6V">
+  <div id="centerCol">
+    <h1 id="title"><span id="productTitle" class="a-size-large product-title-word-break">Nintendo Switch™ 2 – The Legend of Zelda™ – 40th Anniversary Edition</span></h1>
+    <a id="bylineInfo" href="/stores/Nintendo/page/1">Visit the Nintendo Store</a>
+  </div>
+  <div id="rightCol">
+    <div id="desktop_buybox">
+      <div id="buybox">
+        <div id="qualifiedBuybox">
+          <div id="corePrice_feature_div" class="celwidget">
+            <span class="a-price" data-a-color="price"><span class="a-offscreen">$709.99</span><span aria-hidden="true"><span class="a-price-symbol">$</span><span class="a-price-whole">709<span class="a-price-decimal">.</span></span><span class="a-price-fraction">99</span></span></span>
+          </div>
+          <div id="deliveryBlockMessage">FREE delivery Monday, September 28.</div>
+          <div id="availability" class="a-section a-spacing-none"><span class="a-size-medium a-color-success">In Stock</span></div>
+          <div id="quantityRelocate_feature_div">
+            <label for="quantity">Quantity:</label>
+            <select id="quantity" name="quantity"><option value="1" selected>1</option><option value="2">2</option></select>
+          </div>
+          <div id="addToCart_feature_div"><span id="submit.add-to-cart" class="a-button"><input id="add-to-cart-button" name="submit.add-to-cart" title="Add to Shopping Cart" class="a-button-input" type="button" value="Add to cart"></span></div>
+          <div id="buyNow_feature_div"><span id="submit.buy-now" class="a-button"><input id="buy-now-button" name="submit.buy-now" title="Buy Now" class="a-button-input" type="submit" value="Buy Now"></span></div>
+          <div id="fulfillerInfoFeature_feature_div" class="celwidget">
+            <div class="offer-display-feature-label" offer-display-feature-name="desktop-fulfiller-info"><span class="a-size-small a-color-tertiary">Ships from</span></div>
+            <div class="offer-display-feature-text" offer-display-feature-name="desktop-fulfiller-info"><span class="a-size-small offer-display-feature-text-message">Amazon</span></div>
+          </div>
+          <div id="merchantInfoFeature_feature_div" class="celwidget">
+            <div class="offer-display-feature-label" offer-display-feature-name="desktop-merchant-info"><span class="a-size-small a-color-tertiary">Sold by</span></div>
+            <div class="offer-display-feature-text" offer-display-feature-name="desktop-merchant-info"><span class="a-size-small offer-display-feature-text-message">Amazon.ca</span></div>
+          </div>
+          <div id="renewedSingleOfferCaption_feature_div"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</form>
+<script>
+  // Fixture behaviour: Buy Now navigates to the checkout review fixture (same origin route).
+  document.getElementById('addToCart').addEventListener('submit', function (e) {
+    e.preventDefault();
+    location.href = '/gp/buy/spc/handlers/display.html?fixture=' + (window.__checkoutFixture || 'checkout_review');
+  });
+</script>
+</body></html>

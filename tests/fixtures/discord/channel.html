@@ -1,0 +1,135 @@
+<!doctype html>
+<!--
+  Local Discord-like DOM fixture. Mirrors Discord's stable accessibility ids:
+    li#chat-messages-<channelId>-<messageId>
+    div#message-content-<messageId>
+    div#message-accessories-<messageId>
+    time#message-timestamp-<messageId>[datetime]
+    span#message-username-<messageId>
+  Class names are hashed in real Discord and are irrelevant here.
+-->
+<html>
+  <head><meta charset="utf-8" /><title>Discord fixture</title></head>
+  <body>
+    <div id="app-mount">
+      <main class="chatContent_abc">
+        <div class="messagesWrapper_abc">
+          <div class="scroller_abc">
+            <div class="scrollerInner_abc">
+              <ol data-list-id="chat-messages" class="scrollerInner_abc" id="list" role="list"></ol>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script>
+      (function () {
+        const EPOCH = 1420070400000n;
+        function snowflakeFor(ms, seq) {
+          return String(((BigInt(ms) - EPOCH) << 22n) | BigInt(seq || 1));
+        }
+        function messageEl({ channelId, messageId, tsMs, content, author, userId, embed, sending }) {
+          const li = document.createElement("li");
+          li.id = `chat-messages-${channelId}-${messageId}`;
+          li.className = "messageListItem_abc";
+          const article = document.createElement("div");
+          article.className = "message_abc" + (sending ? " isSending_abc" : "");
+          article.setAttribute("role", "article");
+          const contents = document.createElement("div");
+          contents.className = "contents_abc";
+          if (author !== undefined) {
+            const h3 = document.createElement("h3");
+            h3.className = "header_abc";
+            if (userId) {
+              const img = document.createElement("img");
+              img.className = "avatar_abc";
+              img.src = `https://cdn.discordapp.com/avatars/${userId}/abcdef.webp?size=80`;
+              article.appendChild(img);
+            }
+            const name = document.createElement("span");
+            name.id = `message-username-${messageId}`;
+            name.className = "username_abc";
+            name.textContent = author;
+            h3.appendChild(name);
+            if (tsMs != null) {
+              const t = document.createElement("time");
+              t.id = `message-timestamp-${messageId}`;
+              t.setAttribute("datetime", new Date(tsMs).toISOString());
+              t.textContent = "Today at 9:41 PM";
+              h3.appendChild(t);
+            }
+            contents.appendChild(h3);
+          } else if (tsMs != null) {
+            const t = document.createElement("time");
+            t.id = `message-timestamp-${messageId}`;
+            t.setAttribute("datetime", new Date(tsMs).toISOString());
+            contents.appendChild(t);
+          }
+          const body = document.createElement("div");
+          body.id = `message-content-${messageId}`;
+          body.className = "markup_abc messageContent_abc";
+          body.textContent = content || "";
+          contents.appendChild(body);
+          article.appendChild(contents);
+          const acc = document.createElement("div");
+          acc.id = `message-accessories-${messageId}`;
+          acc.className = "container_abc";
+          if (embed) acc.appendChild(embedEl(embed));
+          article.appendChild(acc);
+          li.appendChild(article);
+          return li;
+        }
+        function embedEl({ title, description }) {
+          const art = document.createElement("article");
+          art.className = "embedWrapper_abc embedFull_abc";
+          if (title) {
+            const t = document.createElement("div");
+            t.className = "embedTitle_abc";
+            t.textContent = title;
+            art.appendChild(t);
+          }
+          if (description) {
+            const d = document.createElement("div");
+            d.className = "embedDescription_abc";
+            d.textContent = description;
+            art.appendChild(d);
+          }
+          return art;
+        }
+        const list = () => document.querySelector('ol[data-list-id="chat-messages"]');
+        window.__fx = {
+          snowflakeFor,
+          addMessage(opts) {
+            const li = messageEl(opts);
+            list().appendChild(li);
+            return li.id;
+          },
+          addEmbed(messageId, embed) {
+            const acc = document.getElementById(`message-accessories-${messageId}`);
+            acc.appendChild(embedEl(embed));
+          },
+          setContent(messageId, text) {
+            document.getElementById(`message-content-${messageId}`).textContent = text;
+          },
+          removeMessage(channelId, messageId) {
+            const li = document.getElementById(`chat-messages-${channelId}-${messageId}`);
+            if (li) li.remove();
+          },
+          reappend(channelId, messageId, opts) {
+            // Simulates virtualized re-render of an existing message with a fresh element.
+            const li = messageEl({ channelId, messageId, ...opts });
+            list().appendChild(li);
+          },
+          replaceList() {
+            const old = list();
+            const fresh = old.cloneNode(false);
+            old.replaceWith(fresh);
+          },
+          navigate(path) {
+            history.pushState({}, "", path);
+          },
+        };
+      })();
+    </script>
+  </body>
+</html>

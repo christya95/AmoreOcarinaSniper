@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "AmoreOcarinaSniper Discord Watcher",
+  "version": "0.1.0",
+  "description": "Watches the currently open Discord channel for one configured stock alert and forwards a minimal trigger to a local Python bridge on 127.0.0.1. No Discord API access, no history collection.",
+  "minimum_chrome_version": "116",
+  "permissions": ["storage", "alarms"],
+  "host_permissions": [
+    "https://discord.com/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://discord.com/channels/*"],
+      "js": ["shared/matcher.js", "content/selectors.js", "content/observer.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "AmoreOcarinaSniper",
+    "default_popup": "popup.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  }
+}

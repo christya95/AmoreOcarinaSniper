@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>AmoreOcarinaSniper options</title>
+    <style>
+      body { font: 14px system-ui, sans-serif; max-width: 640px; margin: 24px auto; color: #222; }
+      label { display: block; margin-top: 12px; font-weight: 600; }
+      input { width: 100%; padding: 6px; box-sizing: border-box; margin-top: 4px; }
+      .hint { color: #666; font-size: 12px; margin-top: 2px; }
+      button { margin-top: 16px; padding: 8px 14px; margin-right: 8px; }
+      #msg { margin-top: 12px; min-height: 1.2em; }
+      .warn { background: #fff3cd; border: 1px solid #ffe69c; padding: 10px; margin-top: 16px; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <h1>AmoreOcarinaSniper — extension options</h1>
+
+    <label>Guild (server) id<input id="guildId" placeholder="123456789012345678" /></label>
+    <div class="hint">From the URL: discord.com/channels/&lt;guildId&gt;/&lt;channelId&gt;. Leave empty to skip guild check.</div>
+
+    <label>Channel id<input id="channelId" placeholder="123456789012345678" /></label>
+    <div class="hint">Only this channel is observed. Other channels are ignored entirely.</div>
+
+    <label>Bridge port<input id="bridgePort" type="number" min="1024" max="65535" /></label>
+    <div class="hint">Must equal [bridge].port in config.toml. The bridge only listens on 127.0.0.1.</div>
+
+    <label>Pairing secret<input id="pairingSecret" type="password" autocomplete="off" /></label>
+    <div class="hint">Printed by <code>ocarina pair</code>. Stored only in extension storage; never visible to the page.</div>
+
+    <label>Target id<input id="targetId" /></label>
+    <div class="hint">Must equal [target].target_id in config.toml.</div>
+
+    <label>Freshness window (seconds)<input id="freshnessSec" type="number" min="5" max="600" /></label>
+    <div class="hint">Messages whose rendered timestamp is older than this are never forwarded.</div>
+
+    <label>Sender display name (optional)<input id="senderName" /></label>
+    <label>Sender user id (optional, stronger)<input id="senderUserId" placeholder="digits from the avatar URL" /></label>
+    <div class="hint">A display name alone does not prove identity. If a user id is set, messages that do not show
+      an avatar (grouped messages) fail closed and are not forwarded.</div>
+
+    <button id="save">Save</button>
+    <button id="test">Test bridge</button>
+    <div id="msg"></div>
+
+    <div class="warn">
+      The source server prohibits bots except those run by moderators. This extension does not install a
+      server bot or use Discord APIs, but moderator acceptance of local automated monitoring is unresolved.
+      Nothing here hides that the extension exists or what it does.
+    </div>
+    <script src="options.js"></script>
+  </body>
+</html>

@@ -10,6 +10,10 @@ __pycache__/
 node_modules/
 profiles/
 browser-profile/
+runtime/
+config.toml
+*.egg-info/
+build/
 storage-state*.json
 secrets/
 config.local.*
