@@ -155,6 +155,8 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
   seller `Amazon.ca`, correct ASIN/title. Availability: *"This item will be released on
   October 29, 2026. Pre-order now."* No *Ships from* row. Refused: pre-order (policy) +
   fulfillment unreadable + condition unreadable (both consequences). Window closed by 04:07.
+  Operator tried manually at 03:55 and it was already gone: **window < 3 min.** Bot decision
+  at 03:52:18 (+3 s) would have been inside it; only the pre-order policy blocked it.
 - Fixes shipped (runner restarted 04:17, armed until 16:17): `is_preorder` detection,
   `policy.allow_preorder` (default false, **operator decision pending**), fulfiller inferred
   from Amazon-as-seller when no row is rendered, condition inferred for pre-orders, full
