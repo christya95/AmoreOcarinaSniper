@@ -143,8 +143,9 @@ Gate: every M2 checkout item is verified and M3 is complete.
 Add new items at the top of *Next up*. Move to *Done* with the commit hash.
 
 ### Next up
-- [ ] Operator: clear *Sender user id* in extension Options, reload extension + Discord tab,
-  confirm popup still *monitoring* and *Last skip* = none.
+- [x] Operator cleared *Sender user id* in extension Options; *Sender display name* = `Lbabinz`.
+  Extension reloaded with `c51a9c7`; popup shows *monitoring* and *Last skip: none*
+  (2026-09-24 22:59). Runner left in dry-run, armed until 2026-09-25 10:59.
 - [ ] Wait for the next real Lbabinz alert in dry-run; confirm popup *Last match* updates and
   `ocarina status` shows an accepted event (expected to stop at *not in stock* unless restocked).
 - [ ] Decide `checkout.strategy` default after the first `--checkout-probe`.
