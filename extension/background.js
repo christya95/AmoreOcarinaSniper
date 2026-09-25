@@ -254,10 +254,19 @@ async function popupState() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab) {
-      active = { tabId: tab.id, url: tab.url || "", status: tabStatus.get(tab.id) || null };
-      if (tab.id && (tab.url || "").startsWith("https://discord.com/")) {
-        try { await chrome.tabs.sendMessage(tab.id, { type: "request-status" }); } catch (e) { /* no content script */ }
+      let status = tabStatus.get(tab.id) || null;
+      if (tab.id != null && (tab.url || "").startsWith("https://discord.com/")) {
+        // Pull, don't rely on the cache: this worker may have just been restarted by MV3,
+        // and the content script only pushes when its status changes.
+        try {
+          const fresh = await chrome.tabs.sendMessage(tab.id, { type: "request-status" });
+          if (fresh && fresh.type === "tab-status") {
+            status = { ...fresh, at: Date.now() };
+            tabStatus.set(tab.id, status);
+          }
+        } catch (e) { /* no content script in this tab (needs reload after install) */ }
       }
+      active = { tabId: tab.id, url: tab.url || "", status };
     }
   } catch (e) { /* tabs permission not granted: fine */ }
   return {

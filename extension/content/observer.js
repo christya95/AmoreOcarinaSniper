@@ -52,12 +52,9 @@
     if (state.bodyObserver) state.bodyObserver.disconnect();
   }
 
-  function reportStatus(extra) {
-    // Skip reasons are sticky so the popup can show why the last candidate was dropped;
-    // a plain reportStatus() 500 ms later must not erase them.
-    if (extra && extra.lastSkip) state.lastSkip = `${new Date().toLocaleTimeString()} ${extra.lastSkip}`;
+  function buildStatus(extra) {
     const onChannel = isOnConfiguredChannel();
-    const status = {
+    return {
       lastSkip: state.lastSkip,
       type: "tab-status",
       route: state.route,
@@ -69,6 +66,13 @@
       configured: !!(state.config && state.config.channelId),
       ...(extra || {}),
     };
+  }
+
+  function reportStatus(extra) {
+    // Skip reasons are sticky so the popup can show why the last candidate was dropped;
+    // a plain reportStatus() 500 ms later must not erase them.
+    if (extra && extra.lastSkip) state.lastSkip = `${new Date().toLocaleTimeString()} ${extra.lastSkip}`;
+    const status = buildStatus(extra);
     const key = JSON.stringify(status);
     if (key !== state.lastStatus) {
       state.lastStatus = key;
@@ -367,10 +371,14 @@
   }
 
   try {
-    chrome.runtime.onMessage.addListener((msg) => {
+    chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       if (!msg || state.dead) return;
       if (msg.type === "config-updated") applyConfig(msg.config);
-      if (msg.type === "request-status") reportStatus();
+      if (msg.type === "request-status") {
+        // Answer synchronously: the service worker's in-memory tab status is lost every time
+        // MV3 suspends it, and reportStatus() alone would not resend an unchanged status.
+        sendResponse(buildStatus());
+      }
     });
   } catch (e) {
     /* no runtime: nothing to do */

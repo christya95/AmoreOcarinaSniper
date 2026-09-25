@@ -272,6 +272,23 @@ async def test_sender_name_matches_despite_app_badge(harness):
     assert [c["message_id"] for c in await harness.candidates()] == [mid]
 
 
+async def test_request_status_answers_even_when_unchanged(harness):
+    # MV3 restarts the service worker and wipes its tab-status cache; the popup must be able
+    # to pull the current status even though nothing changed since the last push.
+    await harness.inject_scripts()
+    pushed_before = len(await harness.statuses())
+    await harness.tick(600)
+    assert len(await harness.statuses()) == pushed_before  # nothing new pushed: status is stable
+    reply = await harness.page.evaluate(
+        "() => new Promise(resolve => { let r = null;"
+        " window.__listeners.forEach(fn => fn({type: 'request-status'}, {}, v => { r = v; }));"
+        " resolve(r); })"
+    )
+    assert reply["type"] == "tab-status"
+    assert reply["onChannel"] and reply["attached"] and reply["monitoring"]
+    assert len(await harness.statuses()) == pushed_before  # answered directly, no extra push
+
+
 async def test_paused_config_blocks_detection(harness):
     await harness.inject_scripts()
     await harness.page.evaluate(
