@@ -163,7 +163,17 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
   extractor output retained in `OfferSnapshot.raw` and emitted in telemetry, screenshot+HTML
   captured on any rejection where an offer was present. 173 tests.
 
+### Outage — 2026-09-25 07:41 → 10:15
+- Windows Update (`MoUsoCoreWorker.exe`) initiated a restart at 07:41; PC back 10:03, second
+  update restart 10:05. No Kernel-Power 41, so not a hard thermal cut. Runner down ~2.5 h;
+  no alert reached the bot in that window (Discord history to be checked by operator).
+- Runner relaunched 10:15 LIVE, armed until 22:15. Amazon session survived (profile on disk).
+- Follow-ups: operator to pause Windows Update + set active hours; Scheduled Task at logon
+  (M3) is now a priority; auto sign-in after restart so the task fires.
+
 ### Next up
+- [ ] Scheduled Task: `ocarina run --live` at logon (runner still comes up DISARMED by design).
+- [ ] Operator: pause Windows Update (Settings → Windows Update → Pause), set active hours.
 - [x] Operator approved pre-orders 2026-09-25 04:20: `allow_preorder = true`, runner
   restarted LIVE, armed until 16:20. Next alert → full checkout attempt.
 - [ ] After the next event: read `runtime/logs/runner.log`, `telemetry.jsonl`
