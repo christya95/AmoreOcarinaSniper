@@ -109,7 +109,9 @@ Confirm assumptions against real pages without submitting anything.
   (2026-09-24). Popup: bridge *connected*, Python *ARMED · dry-run*, *correct channel*,
   *monitoring*. (Tab had to be reloaded after Load unpacked for the content script to inject.)
 - [x] `allowed_extension_origin` pinned in `config.toml`; `target.discord_channel_id` pinned.
-- [ ] Sleep/Memory Saver disabled; runner started via Scheduled Task or persistent terminal.
+- [x] Host: AC sleep = Never, display = Never (already set); Comet Memory Saver on with
+  `discord.com` in *Always keep these sites active* (2026-09-24).
+- [ ] Runner started via Scheduled Task (currently a persistent terminal; dies with the session).
 - [ ] Remote access (RDP/VNC/Tailscale) into the same browser profile confirmed for challenges.
 - [x] Dry-run soak (2026-09-24): `ocarina run` + `arm --minutes 30` + `trigger` → accepted,
   `ARMED -> VERIFYING -> ARMED` in 2 s, rejected on *not in stock*. Policy config passes `arm`.
