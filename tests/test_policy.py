@@ -90,6 +90,40 @@ def test_fulfillment_any_accepts_third_party_shipper(tmp_path):
     assert evaluate_offer(replace(good_offer(), fulfiller="Reseller Depot"), cfg.policy, cfg.target).ok
 
 
+def test_missing_ships_from_row_inferred_only_for_amazon_seller(cfg):
+    # Live 2026-09-25 03:52: Amazon.ca-sold pre-order rendered no "Ships from" row at all.
+    assert evaluate_offer(replace(good_offer(), fulfiller=None, seller="Amazon.ca"), cfg.policy, cfg.target).ok
+    assert evaluate_offer(replace(good_offer(), fulfiller=None, seller="Amazon"), cfg.policy, cfg.target).ok
+    d = evaluate_offer(replace(good_offer(), fulfiller=None, seller="Reseller Depot"), cfg.policy, cfg.target)
+    assert not d.ok and any("fulfillment" in r for r in d.reasons)
+    assert evaluate_checkout(replace(good_checkout(), fulfiller=None, seller="Amazon.ca"), cfg.policy, cfg.target).ok
+    d = evaluate_checkout(replace(good_checkout(), fulfiller=None, seller="Reseller Depot"), cfg.policy, cfg.target)
+    assert not d.ok and any("fulfillment" in r for r in d.reasons)
+
+
+PREORDER_AVAIL = "This item will be released on October 29, 2026. Pre-order now."
+
+
+def test_preorder_rejected_by_default_with_explicit_reason(cfg):
+    offer = replace(good_offer(), in_stock=False, is_preorder=True, availability=PREORDER_AVAIL)
+    d = evaluate_offer(offer, cfg.policy, cfg.target)
+    assert not d.ok
+    assert any("pre-order not allowed" in r and "allow_preorder" in r for r in d.reasons), d.reasons
+    assert not any("not in stock" in r for r in d.reasons)
+
+
+def test_preorder_accepted_when_allowed(tmp_path):
+    cfg = make_config(tmp_path, allow_preorder=True)
+    offer = replace(good_offer(), in_stock=False, is_preorder=True, availability=PREORDER_AVAIL)
+    assert evaluate_offer(offer, cfg.policy, cfg.target).ok
+    # allow_preorder does not weaken any other check.
+    assert not evaluate_offer(replace(offer, price=Decimal("750.01")), cfg.policy, cfg.target).ok
+    assert not evaluate_offer(replace(offer, seller="Reseller Depot"), cfg.policy, cfg.target).ok
+    # A plain out-of-stock listing is still refused.
+    oos = replace(good_offer(), in_stock=False, is_preorder=False, availability="Currently unavailable.")
+    assert not evaluate_offer(oos, cfg.policy, cfg.target).ok
+
+
 @pytest.mark.parametrize(
     "change,fragment",
     [
@@ -106,7 +140,7 @@ def test_fulfillment_any_accepts_third_party_shipper(tmp_path):
         ({"total": None}, "total unreadable"),
         ({"total": Decimal("100.00")}, "lower than item price"),
         ({"seller": "Reseller Depot"}, "seller not allowed"),
-        ({"fulfiller": None}, "fulfillment"),
+        ({"fulfiller": None, "seller": "Reseller Depot"}, "fulfillment"),  # no row + non-Amazon seller
         ({"condition": "used"}, "condition"),
         ({"address_text": "9 Other Road"}, "address"),
         ({"address_text": None}, "address"),

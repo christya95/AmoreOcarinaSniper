@@ -64,6 +64,9 @@ class OfferSnapshot:
     buy_now_available: bool
     add_to_cart_available: bool
     raw: dict[str, Any] = field(default_factory=dict)
+    # Availability text announces a release date / "Pre-order now" (observed live 2026-09-25
+    # 03:52 on the target ASIN). Purchasable only when policy.allow_preorder is set.
+    is_preorder: bool = False
 
 
 @dataclass

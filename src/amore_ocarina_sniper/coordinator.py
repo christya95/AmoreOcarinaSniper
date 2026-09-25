@@ -132,15 +132,21 @@ class PurchaseCoordinator:
                 price=str(offer.price),
                 seller=offer.seller,
                 in_stock=offer.in_stock,
+                is_preorder=offer.is_preorder,
+                offer=asdict(offer),
             )
             if not decision.ok:
-                if offer.in_stock:
-                    # The interesting case: stock was there and we still refused. Keep the
+                offer_present = (
+                    offer.in_stock or offer.is_preorder or offer.price is not None
+                    or offer.buy_now_available or offer.add_to_cart_available
+                )
+                if offer_present:
+                    # The interesting case: there WAS an offer and we still refused. Keep the
                     # evidence (off the critical path; the attempt is already over).
                     artifact = await self.adapter.capture_artifact("offer-rejected", html=True)
                     self.telemetry.emit(
-                        "offer_rejected_in_stock", event_id=eid, reasons=decision.reasons,
-                        offer=asdict(offer), artifact=artifact,
+                        "offer_rejected_with_offer_present", event_id=eid, reasons=decision.reasons,
+                        artifact=artifact,
                     )
                 return self._finish_pre_intent(
                     eid, "offer rejected: " + "; ".join(decision.reasons), benign=True

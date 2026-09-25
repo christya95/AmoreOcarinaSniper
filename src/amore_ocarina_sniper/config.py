@@ -86,6 +86,9 @@ class PurchasePolicy:
     approved_payment_contains: str
     default_arm_minutes: int
     max_arm_minutes: int
+    # Accept listings whose availability announces a release date ("Pre-order now").
+    # Off by default: a pre-order is a commitment to buy on release, not an in-stock purchase.
+    allow_preorder: bool = False
 
     def readiness_problems(self) -> list[str]:
         """Reasons this policy can never allow a purchase (reported by `doctor`/`arm`)."""
@@ -259,6 +262,7 @@ def load_config_dict(raw: dict, base_dir: Path, source_path: Path | None = None)
         approved_payment_contains=_opt(policy_raw, "policy", "approved_payment_contains", str, ""),
         default_arm_minutes=_opt(policy_raw, "policy", "default_arm_minutes", int, 120),
         max_arm_minutes=_opt(policy_raw, "policy", "max_arm_minutes", int, 720),
+        allow_preorder=_opt(policy_raw, "policy", "allow_preorder", bool, False),
     )
     if policy.default_arm_minutes <= 0 or policy.max_arm_minutes <= 0:
         raise ConfigError("[policy] arm minutes must be > 0")

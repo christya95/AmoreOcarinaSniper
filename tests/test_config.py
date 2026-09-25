@@ -35,6 +35,16 @@ def test_ready_policy_has_no_problems(tmp_path):
     assert cfg.policy.readiness_problems() == []
 
 
+def test_allow_preorder_defaults_false_and_parses(tmp_path):
+    raw = _example()
+    assert load_config_dict(raw, base_dir=tmp_path).policy.allow_preorder is False
+    raw["policy"]["allow_preorder"] = True
+    assert load_config_dict(raw, base_dir=tmp_path).policy.allow_preorder is True
+    raw["policy"]["allow_preorder"] = "yes"
+    with pytest.raises(ConfigError):
+        load_config_dict(raw, base_dir=tmp_path)
+
+
 @pytest.mark.parametrize(
     "mutate,fragment",
     [

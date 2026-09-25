@@ -98,7 +98,8 @@ Confirm assumptions against real pages without submitting anything.
 - [!] Checkout review page (`CHECKOUT_PAGE` selectors, turbo-checkout iframe, confirmation
   markers, order-id pattern) via `ocarina doctor --browser --checkout-probe` — needs signed-in
   session **and** the item in stock.
-- [ ] Amazon-as-seller display text (`Amazon.ca` vs `Amazon`) — confirm which alias appears.
+- [x] Amazon-as-seller display text: `Amazon.ca` (live 2026-09-25 03:52). No *Ships from* row
+  on the Amazon-sold pre-order; fulfiller now inferred from seller in that case.
 - [ ] Does Buy Now on this listing expose every policy field? If not, switch default
   `checkout.strategy` to `"cart"` and document the unrelated-cart-items caveat.
 
@@ -149,7 +150,20 @@ drop) rather than mis-purchase; the run doubles as the checkout probe. See Decis
 
 Add new items at the top of *Next up*. Move to *Done* with the commit hash.
 
+### First live event — 2026-09-25 03:52:15 (event `755171032393973760-1552950852480667680`)
+- Detection 103 ms after message ts; bridge +7 ms; offer read in 2.35 s. Price `709.99`,
+  seller `Amazon.ca`, correct ASIN/title. Availability: *"This item will be released on
+  October 29, 2026. Pre-order now."* No *Ships from* row. Refused: pre-order (policy) +
+  fulfillment unreadable + condition unreadable (both consequences). Window closed by 04:07.
+- Fixes shipped (runner restarted 04:17, armed until 16:17): `is_preorder` detection,
+  `policy.allow_preorder` (default false, **operator decision pending**), fulfiller inferred
+  from Amazon-as-seller when no row is rendered, condition inferred for pre-orders, full
+  extractor output retained in `OfferSnapshot.raw` and emitted in telemetry, screenshot+HTML
+  captured on any rejection where an offer was present. 173 tests.
+
 ### Next up
+- [ ] **Operator: decide `policy.allow_preorder`.** If true → edit `config.toml`, restart the
+  runner (kill the `ocarina run --live` window, relaunch), `ocarina arm --minutes 720`.
 - [x] Operator cleared *Sender user id* in extension Options; *Sender display name* = `Lbabinz`.
   Extension reloaded with `c51a9c7`; popup shows *monitoring* and *Last skip: none*
   (2026-09-24 22:59). Runner left in dry-run, armed until 2026-09-25 10:59.

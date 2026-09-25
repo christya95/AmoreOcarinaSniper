@@ -132,10 +132,13 @@ def parse_offer(raw: dict[str, Any]) -> OfferSnapshot:
         currency = None  # "$" only means CAD on amazon.ca
     availability = _val(raw, "availability")
     avail_norm = normalize_text(availability)
-    in_stock = (
+    unavailable = any(bad in avail_norm for bad in ("unavailable", "out of stock", "not available"))
+    in_stock = bool(avail_norm) and "in stock" in avail_norm and not unavailable
+    # Live 2026-09-25: "This item will be released on October 29, 2026. Pre-order now."
+    is_preorder = (
         bool(avail_norm)
-        and "in stock" in avail_norm
-        and not any(bad in avail_norm for bad in ("unavailable", "out of stock", "not available"))
+        and not unavailable
+        and any(k in avail_norm for k in ("pre order", "preorder", "will be released"))
     )
     seller = _clean_prefix(_val(raw, "seller"), "sold by")
     fulfiller = _clean_prefix(_val(raw, "fulfiller"), "ships from")
@@ -145,10 +148,20 @@ def parse_offer(raw: dict[str, Any]) -> OfferSnapshot:
     condition: str | None
     if used_present or renewed or any(w in buybox_text for w in ("renewed", "refurbished", " used ")):
         condition = "used"
-    elif buybox_text and in_stock:
+    elif buybox_text and (in_stock or is_preorder):
         condition = "new"
     else:
         condition = None
+    # Keep everything the extractor saw (which selector matched, what was present, which
+    # buttons were visible) except the large body text; it is what makes a live miss fixable.
+    raw_kept = {
+        "url": url,
+        "price_text": price_text,
+        "quantity": _val(raw, "quantity"),
+        "fields": raw.get("fields", {}),
+        "present": raw.get("present", {}),
+        "hasVisibleButton": raw.get("hasVisibleButton", {}),
+    }
     twister_present = bool(raw.get("present", {}).get("twister"))
     return OfferSnapshot(
         asin=(_val(raw, "asin") or "").upper() or None,
@@ -164,7 +177,8 @@ def parse_offer(raw: dict[str, Any]) -> OfferSnapshot:
         has_variant_selector=twister_present,
         buy_now_available=bool(raw.get("hasVisibleButton", {}).get("buy_now")),
         add_to_cart_available=bool(raw.get("hasVisibleButton", {}).get("add_to_cart")),
-        raw={"url": url, "price_text": price_text, "quantity": _val(raw, "quantity")},
+        raw=raw_kept,
+        is_preorder=is_preorder,
     )
 
 

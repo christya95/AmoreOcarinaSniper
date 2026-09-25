@@ -45,8 +45,13 @@ quantity = 1
 condition = "new"
 # Allowed sellers (normalized, case-insensitive). Typical: ["amazon.ca", "amazon"]
 allowed_sellers = ["amazon.ca"]
-# Fulfillment requirement: "amazon" (Ships from Amazon) or "any"
+# Fulfillment requirement: "amazon" (Ships from Amazon) or "any". When the page shows no
+# "Ships from" row at all, Amazon-as-seller is accepted (Amazon retail ships its own offers);
+# any other seller without an explicit "Ships from Amazon" fails closed.
 fulfillment = "amazon"
+# Accept pre-order listings ("This item will be released on <date>. Pre-order now.").
+# Off by default: a pre-order commits you to buy on release. Observed live 2026-09-25.
+allow_preorder = false
 # Substring that must appear in the shipping address block shown at checkout
 # (e.g. a street number + name fragment you recognise). Empty = fail closed.
 approved_address_contains = ""

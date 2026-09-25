@@ -91,6 +91,35 @@ async def test_offer_unavailable_fails_closed(config):
     assert any("not in stock" in r for r in decision.reasons)
 
 
+async def test_offer_preorder_parses_and_is_policy_gated(config, tmp_path):
+    from dataclasses import replace
+
+    from .conftest import make_config
+
+    adapter = await start_adapter(config, Routing(product="product_preorder.html"))
+    try:
+        offer = await adapter.verify_offer()
+    finally:
+        await adapter.stop()
+    assert offer.is_preorder and not offer.in_stock
+    assert offer.price == Decimal("709.99") and offer.currency == "CAD"
+    assert offer.seller == "Amazon.ca" and offer.fulfiller is None
+    assert offer.condition == "new"  # inferred from the buy box for pre-orders too
+    assert offer.buy_now_available and offer.add_to_cart_available
+    # Diagnostics retained: which selector produced each value and what was present.
+    assert offer.raw["fields"]["seller"]["selector"]
+    assert offer.raw["present"]["fulfiller"] is False
+    assert offer.raw["hasVisibleButton"]["add_to_cart"] is True
+
+    decision = evaluate_offer(offer, config.policy, config.target)
+    assert not decision.ok
+    assert [r for r in decision.reasons if "pre-order not allowed" in r]
+    assert not [r for r in decision.reasons if "fulfillment" in r or "condition" in r]
+
+    allowed = make_config(tmp_path / "allow", allow_preorder=True)
+    assert evaluate_offer(replace(offer), allowed.policy, allowed.target).ok
+
+
 async def test_offer_third_party_variant_usd_rejected(config):
     adapter = await start_adapter(config, Routing(product="product_third_party.html"))
     try:

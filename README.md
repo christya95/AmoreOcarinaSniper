@@ -72,7 +72,8 @@ address/payment fragments, so **`ocarina arm` refuses until you set them deliber
 | `policy.max_item_price` | CAD, decimal string. Item price on the product page and review page must be ≤ this. |
 | `policy.max_total` | CAD. Order total (tax, shipping, fees) on the review page must be ≤ this. |
 | `policy.allowed_sellers` | e.g. `["amazon.ca"]`. Third-party sellers are rejected unless listed. |
-| `policy.fulfillment` | `"amazon"` (Ships from Amazon) or `"any"`. |
+| `policy.fulfillment` | `"amazon"` (Ships from Amazon) or `"any"`. If no *Ships from* row is rendered, Amazon-as-seller is accepted; other sellers fail closed. |
+| `policy.allow_preorder` | Default `false`. Accept listings whose availability announces a release date ("Pre-order now"). All other checks still apply. |
 | `policy.approved_address_contains` | Fragment that must appear in the shipping address block (e.g. street number + name). |
 | `policy.approved_payment_contains` | Fragment that must appear in the payment block (e.g. `ending in 4242`). |
 | `policy.default_arm_minutes` / `max_arm_minutes` | Armed-session bounds. |
@@ -186,7 +187,7 @@ purchase latency has been measured; none is promised.
 ## Tests
 
 ```powershell
-python -m pytest -q          # 167 tests, ~75 s (headless Chromium for fixture-driven tests)
+python -m pytest -q          # 173 tests, ~80 s (headless Chromium for fixture-driven tests)
 ruff check src tests
 ```
 
@@ -222,6 +223,13 @@ exists with the expected title and was **unavailable** (no price, no buy box).
 and in stock):** every checkout review-page selector in `amazon/selectors.py`
 (`CHECKOUT_PAGE`), the turbo-checkout iframe, the confirmation page markers and order-id
 pattern, order-history layout, MFA selectors. `ocarina doctor` prints the table.
+
+**Live-verified end to end (2026-09-25 03:52, real alert, `--live`, armed):** Discord detection
+103 ms after the message timestamp → bridge +7 ms → product page read in 2.35 s. `#productTitle`,
+`input#ASIN`, price `$709.99`, seller `Amazon.ca`, availability *"This item will be released on
+October 29, 2026. Pre-order now."* all parsed. No *Ships from* row was rendered for the
+Amazon-sold pre-order. The attempt was refused (pre-order, `allow_preorder = false`); nothing was
+submitted. The pre-order window had closed again by 04:07.
 
 **Live-verified (discord.com, target channel, 2026-09-24):** message list, message/content/
 accessories ids, `time[datetime]`, embed text, username header + `data-text` + `APP` badge. The

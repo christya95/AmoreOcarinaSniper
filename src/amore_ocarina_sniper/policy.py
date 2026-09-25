@@ -30,11 +30,18 @@ def seller_allowed(seller: str | None, allowed: tuple[str, ...]) -> bool:
     return False
 
 
-def fulfiller_ok(fulfiller: str | None, requirement: str) -> bool:
+def _is_amazon_seller(seller: str | None) -> bool:
+    return _norm_seller(seller) in {"amazon", "amazonca", "amazoncomcainc"}
+
+
+def fulfiller_ok(fulfiller: str | None, requirement: str, *, seller: str | None = None) -> bool:
     if requirement == "any":
         return True
     if not fulfiller:
-        return False
+        # Live 2026-09-25: an Amazon.ca-sold pre-order rendered "Sold by Amazon.ca" with no
+        # "Ships from" row at all. Amazon retail never uses third-party fulfillment for its own
+        # offers, so the seller settles it. Third-party sellers still need an explicit row.
+        return _is_amazon_seller(seller)
     f = normalize_text(fulfiller)
     f = f.removeprefix("ships from").strip()
     return f in AMAZON_FULFILLER_ALIASES or f.replace(" ", "") in {"amazon", "amazonca"}
@@ -58,7 +65,13 @@ def evaluate_offer(offer: OfferSnapshot, policy: PurchasePolicy, target: TargetC
         reasons.append("title does not match configured target")
     if offer.has_variant_selector:
         reasons.append("variant selector present; variant ambiguity fails closed")
-    if not offer.in_stock:
+    if offer.in_stock:
+        pass
+    elif offer.is_preorder and policy.allow_preorder:
+        pass
+    elif offer.is_preorder:
+        reasons.append(f"pre-order not allowed (policy.allow_preorder = false): {offer.availability}")
+    else:
         reasons.append(f"not in stock: {offer.availability or 'availability unreadable'}")
     if offer.price is None:
         reasons.append("price unreadable")
@@ -68,7 +81,7 @@ def evaluate_offer(offer: OfferSnapshot, policy: PurchasePolicy, target: TargetC
         reasons.append(f"currency {offer.currency or 'unreadable'} != {policy.currency}")
     if not seller_allowed(offer.seller, policy.allowed_sellers):
         reasons.append(f"seller not allowed: {offer.seller or 'unreadable'}")
-    if not fulfiller_ok(offer.fulfiller, policy.fulfillment):
+    if not fulfiller_ok(offer.fulfiller, policy.fulfillment, seller=offer.seller):
         reasons.append(f"fulfillment not acceptable: {offer.fulfiller or 'unreadable'}")
     if (offer.condition or "").strip().lower() != policy.condition:
         reasons.append(f"condition {offer.condition or 'unreadable'} != {policy.condition}")
@@ -108,7 +121,7 @@ def evaluate_checkout(snap: CheckoutSnapshot, policy: PurchasePolicy, target: Ta
         reasons.append("order total lower than item price; page state ambiguous")
     if not seller_allowed(snap.seller, policy.allowed_sellers):
         reasons.append(f"checkout seller not allowed: {snap.seller or 'unreadable'}")
-    if not fulfiller_ok(snap.fulfiller, policy.fulfillment):
+    if not fulfiller_ok(snap.fulfiller, policy.fulfillment, seller=snap.seller):
         reasons.append(f"checkout fulfillment not acceptable: {snap.fulfiller or 'unreadable'}")
     if (snap.condition or "").strip().lower() != policy.condition:
         reasons.append(f"checkout condition {snap.condition or 'unreadable'} != {policy.condition}")
