@@ -162,8 +162,11 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
   captured on any rejection where an offer was present. 173 tests.
 
 ### Next up
-- [ ] **Operator: decide `policy.allow_preorder`.** If true → edit `config.toml`, restart the
-  runner (kill the `ocarina run --live` window, relaunch), `ocarina arm --minutes 720`.
+- [x] Operator approved pre-orders 2026-09-25 04:20: `allow_preorder = true`, runner
+  restarted LIVE, armed until 16:20. Next alert → full checkout attempt.
+- [ ] After the next event: read `runtime/logs/runner.log`, `telemetry.jsonl`
+  (`checkout_checked.snapshot`), `runtime/artifacts/*checkout-rejected*`; fix any unread
+  review-page field; mark M2 checkout selectors verified/adjusted.
 - [x] Operator cleared *Sender user id* in extension Options; *Sender display name* = `Lbabinz`.
   Extension reloaded with `c51a9c7`; popup shows *monitoring* and *Last skip: none*
   (2026-09-24 22:59). Runner left in dry-run, armed until 2026-09-25 10:59.
