@@ -188,6 +188,13 @@ def parse_offer(raw: dict[str, Any]) -> OfferSnapshot:
 
 
 _QTY_RE = re.compile(r"(?:qty|quantity)\s*:?\s*(\d+)", re.I)
+_CONDITION_WORDS = ("new", "used", "renewed", "refurbished", "open box", "collectible", "acceptable")
+
+
+def _looks_like_condition(text: str) -> bool:
+    """A real condition value is a short label containing a condition word, not prose."""
+    low = normalize_text(text)
+    return 0 < len(low) <= 40 and any(w in low for w in _CONDITION_WORDS)
 
 
 def _parse_quantity(text: str | None) -> int | None:
@@ -213,6 +220,10 @@ def parse_checkout(raw: dict[str, Any], *, product_condition: str | None) -> Che
     line_items = counts.get("line_items")
     line_item_count = int(line_items) if isinstance(line_items, int) and line_items > 0 else None
     condition = _clean_prefix(_val(raw, "condition"), "condition")
+    if condition is not None and not _looks_like_condition(condition):
+        # A candidate matched some unrelated sentence (rehearsal 2026-09-25: the footer's
+        # "Conditions of use"). Treat as "no condition row" rather than as a wrong condition.
+        condition = None
     if condition is None and product_condition == "new":
         condition = "new"
     # Live review page: the ASIN is the *text* of a hidden data-testid span; legacy layouts

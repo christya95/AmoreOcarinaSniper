@@ -104,10 +104,35 @@ def cmd_doctor(args) -> int:
     for page, field, status in S.verification_report():
         print(f"  {page:9s} {field:14s} {status}")
     if args.browser:
+        import dataclasses
+
         from .amazon.adapter import AmazonAdapter
 
+        probe_cfg = cfg
+        probe_asin = (getattr(args, "probe_asin", "") or "").strip().upper()
+        if probe_asin:
+            # Rehearsal against a stand-in listing (a cheap in-stock item): exercises the real
+            # add-to-cart → cart → review-page path in the bot's own browser profile, in
+            # dry-run. Policy is *reported*, not bypassed: the stand-in fails ASIN/title checks
+            # by design and nothing can be submitted (dry-run adapter refuses submit_order).
+            # The stand-in usually *has* Buy Now while the pre-order target never does, so the
+            # rehearsal forces the cart strategy: that is the path a real attempt will take.
+            probe_cfg = dataclasses.replace(
+                cfg,
+                target=dataclasses.replace(
+                    cfg.target, asin=probe_asin, url=f"https://{S.PRODUCT_URL_HOST}/dp/{probe_asin}"
+                ),
+                checkout=dataclasses.replace(cfg.checkout, strategy="cart"),
+            )
+            print(
+                f"\nREHEARSAL against stand-in ASIN {probe_asin}"
+                " (dry-run, cart strategy forced; nothing is submitted)"
+            )
+
         async def probe() -> None:
-            adapter = AmazonAdapter(cfg, dry_run=True, headless=args.headless)
+            adapter = AmazonAdapter(probe_cfg, dry_run=True, headless=args.headless)
+            if probe_asin and args.checkout_probe:
+                adapter.probe_dir = cfg.paths.artifacts_dir / f"probe-{time.strftime('%Y%m%d-%H%M%S')}"
             await adapter.start()
             try:
                 status = await adapter.session_status()
@@ -115,7 +140,9 @@ def cmd_doctor(args) -> int:
                     f"\nbrowser: url={status['url']} challenge={status['challenge']}"
                     f" signed_in={status['signed_in']}"
                 )
+                t0 = time.monotonic()
                 offer = await adapter.verify_offer()
+                print(f"offer read in {time.monotonic() - t0:.2f}s")
                 print(
                     "offer:",
                     json.dumps({k: str(v) for k, v in offer.__dict__.items() if k != "raw"}, indent=2),
@@ -124,17 +151,23 @@ def cmd_doctor(args) -> int:
 
                 decision = evaluate_offer(offer, cfg.policy, cfg.target)
                 print("offer policy:", "OK" if decision.ok else "; ".join(decision.reasons))
-                if args.checkout_probe and decision.ok:
+                if args.checkout_probe and (decision.ok or probe_asin):
                     print("probing checkout surface (dry-run; nothing is submitted)...")
+                    t1 = time.monotonic()
                     snap = await adapter.prepare_checkout(offer)
+                    print(f"review page reached in {time.monotonic() - t1:.2f}s")
                     print(
                         "checkout:",
                         json.dumps({k: str(v) for k, v in snap.__dict__.items() if k != "raw"}, indent=2),
                     )
+                    matched = {k: v.get("selector") for k, v in snap.raw.get("fields", {}).items()}
+                    print("matched selectors:", json.dumps(matched, indent=2))
                     from .policy import evaluate_checkout
 
                     d2 = evaluate_checkout(snap, cfg.policy, cfg.target)
                     print("checkout policy:", "OK" if d2.ok else "; ".join(d2.reasons))
+                    if adapter.probe_dir:
+                        print(f"redacted page dumps: {adapter.probe_dir}")
                     await adapter.abandon()
             finally:
                 await adapter.stop()
@@ -348,6 +381,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--checkout-probe",
         action="store_true",
         help="with --browser: open the checkout surface in dry-run and report fields",
+    )
+    s.add_argument(
+        "--probe-asin",
+        default="",
+        metavar="ASIN",
+        help="with --checkout-probe: rehearse the cart→review path against a stand-in in-stock "
+        "listing (policy is reported, not bypassed; nothing is ever submitted; leaves the item in the cart)",
     )
     s.add_argument("--headless", action="store_true")
     s.set_defaults(fn=cmd_doctor)

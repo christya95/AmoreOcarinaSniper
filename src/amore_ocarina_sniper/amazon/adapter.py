@@ -28,6 +28,25 @@ from .extract import (
 
 log = logging.getLogger("ocarina.amazon")
 
+# Serialises the current DOM with scripts removed, hidden-input values blanked (checkout
+# tokens, CSRF) and long digit runs masked (card / order numbers). Same redaction the
+# operator's manual capture used; the output is for selector verification only.
+_REDACTED_HTML_JS = """() => {
+  const c = document.documentElement.cloneNode(true);
+  c.querySelectorAll('script,style,link,svg,img,noscript,iframe').forEach(e => e.remove());
+  c.querySelectorAll('input[type=hidden]').forEach(e => e.setAttribute('value', '[HIDDEN]'));
+  return c.outerHTML.replace(/\\b\\d{12,19}\\b/g, '[NUM]');
+}"""
+
+# True when any of the selectors matches a *rendered* element (layout box present).
+_ANY_VISIBLE_JS = """(sels) => sels.some((sel) => {
+  let els; try { els = document.querySelectorAll(sel); } catch (e) { return false; }
+  for (const el of els) {
+    if (el.offsetParent !== null || el.getClientRects().length) return true;
+  }
+  return false;
+})"""
+
 
 class DryRunRefusal(RuntimeError):
     """Defence in depth: the adapter refuses to click Place Order while in dry-run."""
@@ -70,6 +89,21 @@ class AmazonAdapter:
         self._last_offer_condition: str | None = None
         self._used_cart_path = False
         self._cart_row_selector = S.CART_PAGE["rows"][-1]
+        # Rehearsal only (`ocarina doctor --checkout-probe`): when set, a redacted copy of each
+        # page the checkout path passes through is written here so selectors can be verified
+        # offline. Never set by the runner; off the critical path.
+        self.probe_dir: Path | None = None
+
+    async def _probe_dump(self, name: str) -> None:
+        if self.probe_dir is None:
+            return
+        try:
+            html = await self.page.evaluate(_REDACTED_HTML_JS)
+            self.probe_dir.mkdir(parents=True, exist_ok=True)
+            (self.probe_dir / f"{name}.html").write_text(html, encoding="utf-8")
+            log.info("probe: saved %s (%d chars) url=%s", name, len(html), self.page.url)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("probe: could not save %s: %s", name, exc)
 
     # ------------------------------------------------------------ lifecycle
     async def start(self) -> None:
@@ -203,8 +237,13 @@ class AmazonAdapter:
             # path for the target listing, not a fallback.
             self._used_cart_path = True
             units = await self._add_to_cart_confirmed()
-            if not (units == 1 and await self._proceed_from_confirmation()):
+            await self._probe_dump("after-add-to-cart")
+            if units == 1 and await self._proceed_from_confirmation():
+                log.info("cart path: fast checkout from the add-to-cart confirmation (units=1)")
+            else:
+                log.info("cart path: via cart page (units=%s)", units)
                 await self.page.goto(S.CART_URL, wait_until="domcontentloaded")
+                await self._probe_dump("cart-page")
                 await self._tidy_cart(cfg.target.asin)
                 await self._click_first(self.page, S.CART_PAGE["proceed"])
         else:
@@ -213,6 +252,7 @@ class AmazonAdapter:
         target = await self._wait_for_checkout_surface()
         self._checkout_target = target
         await self._raise_if_challenge(target)
+        await self._probe_dump("review-page")
         raw = await self._extract(target, CHECKOUT_SPEC)
         return parse_checkout(raw, product_condition=self._last_offer_condition)
 
@@ -234,27 +274,61 @@ class AmazonAdapter:
         return int(digits) if digits else None
 
     async def _add_to_cart_confirmed(self) -> int | None:
-        """Click add-to-cart and wait until Amazon acknowledges it. Returns cart units."""
+        """Click add-to-cart and wait until Amazon acknowledges it. Returns cart units.
+
+        Rehearsal 2026-09-25: the desktop button (class attach-dss-atc) adds via AJAX and slides
+        in `#attach-desktop-sideSheet` — on this account a *warranty upsell* pane, not an
+        "added to cart" message — while the nav badge is progressively loaded and may not be
+        readable before the click. Three independent signals are therefore watched: the
+        add-to-cart network response, a *visible* confirmation surface, and a badge increase.
+        """
         cfg = self.config
+        page = self.page
         before = await self._cart_units()
-        await self._click_first(self.page, S.PRODUCT_PAGE["add_to_cart"].candidates)
-        deadline = time.monotonic() + cfg.checkout.element_timeout_ms / 1000
-        confirm_sel = ", ".join(S.ADD_TO_CART_CONFIRMATION)
-        while time.monotonic() < deadline:
-            url = self.page.url.lower()
-            if "/cart/" in url or "/huc/" in url:
-                break
-            try:
-                if await self.page.query_selector(confirm_sel):
+        acknowledged = asyncio.Event()
+        seen_paths: list[str] = []
+
+        def on_response(resp) -> None:
+            path = resp.url.split("?", 1)[0].lower()
+            if self.probe_dir is not None and resp.request.method == "POST":
+                seen_paths.append(f"{resp.status} {path}")  # rehearsal: learn the AJAX endpoint
+            if resp.request.method == "POST" and any(m in path for m in S.ADD_TO_CART_RESPONSE_MARKERS):
+                if resp.status < 400:
+                    acknowledged.set()
+
+        page.on("response", on_response)
+        t0 = time.monotonic()
+        how = "timeout"
+        try:
+            await self._click_first(page, S.PRODUCT_PAGE["add_to_cart"].candidates)
+            deadline = time.monotonic() + cfg.checkout.element_timeout_ms / 1000
+            while time.monotonic() < deadline:
+                url = page.url.lower()
+                if "/cart/" in url or "/huc/" in url:
+                    how = "navigation"
                     break
-            except Exception:
-                pass  # mid-navigation
-            units = await self._cart_units()
-            if units is not None and before is not None and units > before:
-                break
-            await asyncio.sleep(0.05)
-        else:
+                if acknowledged.is_set():
+                    how = "network"
+                    break
+                try:
+                    if await page.evaluate(_ANY_VISIBLE_JS, list(S.ADD_TO_CART_CONFIRMATION)):
+                        how = "surface"
+                        break
+                except Exception:
+                    pass  # mid-navigation
+                units = await self._cart_units()
+                if units is not None and units > (before or 0):
+                    how = "badge"
+                    break
+                await asyncio.sleep(0.05)
+        finally:
+            page.remove_listener("response", on_response)
+        if how == "timeout":
             log.warning("add to cart: no confirmation observed within timeout; checking the cart page")
+        else:
+            log.info("add to cart acknowledged via %s in %.2fs", how, time.monotonic() - t0)
+        if seen_paths:
+            log.info("probe: add-to-cart responses: %s", seen_paths)
         await asyncio.sleep(0.15)  # let the badge settle
         return await self._cart_units()
 
@@ -350,6 +424,13 @@ class AmazonAdapter:
                 return
             target_rows = [r for r in rows if r["asin"] == target_asin]
             if not target_rows:
+                if passes == 0:
+                    # The add is acknowledged asynchronously; give the cart one short re-read
+                    # before failing closed.
+                    passes += 1
+                    await asyncio.sleep(0.6)
+                    await self.page.reload(wait_until="domcontentloaded")
+                    continue
                 raise ChallengeDetected(
                     ChallengeKind.UNKNOWN_PAGE, "target item not in cart after add to cart"
                 )

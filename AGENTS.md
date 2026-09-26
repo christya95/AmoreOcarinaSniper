@@ -107,8 +107,9 @@ Confirm assumptions against real pages without submitting anything.
   the cart path).
 - [x] Amazon-as-seller display text: `Amazon.ca` (live 2026-09-25 03:52). No *Ships from* row
   on the Amazon-sold pre-order; fulfiller now inferred from seller in that case.
-- [ ] Does Buy Now on this listing expose every policy field? If not, switch default
-  `checkout.strategy` to `"cart"` and document the unrelated-cart-items caveat.
+- [x] Buy Now is never shown on this listing (operator, 2026-09-25); the cart path is primary
+  and was rehearsed end-to-end in the bot's profile (3.0 s to the review page). Cart tidy
+  handles unrelated items / leftover quantity.
 
 ### M3 — Always-on Windows deployment `[ ]`
 - [x] `ocarina pair` / `ocarina setup` completed on the host (2026-09-24); Amazon signed in.
@@ -231,8 +232,30 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
 - **Six of eleven assumed fields would have read empty → the order would have been refused.**
   Selectors fixed, `item_asin_attr` legacy fallback added, `checkout.html` fixture rebuilt to
   mirror the live markup (+ `blocked` variant), review test asserts the *verified* selector
-  matched for each field. Still ASSUMED: add-to-cart side-sheet ids, confirmation markers,
-  order-history URL.
+  matched for each field.
+
+### Rehearsal in the bot's own profile — 2026-09-25 21:40–21:48
+- New `ocarina doctor --browser --checkout-probe --probe-asin <ASIN>`: runs the real
+  add-to-cart → cart → review path against a stand-in (GameSir controller `B0GJZ8WJD9`) in
+  dry-run with the cart strategy forced; policy reported not bypassed; `adapter.probe_dir`
+  writes redacted dumps (`after-add-to-cart`, `cart-page`, `review-page`) to
+  `runtime/artifacts/probe-<ts>/`. Runner must be stopped for it (profile lock); ~3 min.
+- Run 1 (took Buy Now — stand-in has it): **bug** — legacy `.a-size-small:has-text('Condition')`
+  matched the footer "…privacy notice and Conditions of use" → `condition != new` → **would
+  have refused the real order**. Candidate removed; `parse_checkout` now sanity-checks the
+  condition text (`_looks_like_condition`) and inherits from the product page otherwise.
+- Run 2 (cart path): add registered but **no confirmation id existed** → waited out the
+  element timeout → review page in 11.4 s. Dump showed the desktop ATC button (`attach-dss-atc`)
+  adds via AJAX and opens `#attach-desktop-sideSheet` with a **warranty upsell**
+  (`#attach-warranty-pane`, `#attachSiAddCoverage`/`#attachSiNoCoverage`), no Proceed button;
+  nav badge is progressively loaded (baseline unreadable). `_add_to_cart_confirmed` now
+  watches three signals: POST response to `/cart/add-to-cart`, a *visible* confirmation
+  surface (verified side-sheet selectors first), badge > (before or 0). Cart step re-reads once
+  before failing closed on "target missing".
+- Run 3: acknowledged via surface in 0.30 s; review page in **3.02 s**; every field matched its
+  verified selector; policy refused only on the expected ASIN/title/seller. Runner relaunched
+  LIVE 21:49, armed until 09:49. Still ASSUMED: confirmation (thank-you) markers, side-sheet
+  Proceed button (not offered), order-history URL.
   Fixtures `product_preorder_cart_only.html`, `cart.html` (8 variants); 8 browser tests.
 
 ### Next up

@@ -115,9 +115,16 @@ CART_URL = "https://www.amazon.ca/gp/cart/view.html"
 NAV_CART_COUNT = "#nav-cart-count"  # VERIFIED (total units in cart)
 CART_TOTAL_ITEM_COUNT = "#sc-active-cart[data-cart-total-item-count]"  # VERIFIED (attr)
 
-# After clicking add-to-cart, any of these means the add registered (side sheet, "added to
-# cart" page, or the cart itself). ASSUMED except NAV_CART_COUNT changing.
+# After clicking add-to-cart, any of these being *visible* means the add registered.
+# Rehearsal 2026-09-25 21:42 (signed in, bot's own profile): the desktop button carries class
+# `attach-dss-atc`, adds via AJAX and opens `#attach-desktop-sideSheet` (role=dialog,
+# aria-modal) showing a warranty upsell (`#attach-warranty-pane`, "Add to your order",
+# `#attachSiAddCoverage` / `#attachSiNoCoverage`) behind `#attach-popover-lgtbox`. No
+# "Proceed to checkout" control was offered there, so the cart page follows.
 ADD_TO_CART_CONFIRMATION = (
+    "#attach-desktop-sideSheet[aria-modal='true']",  # VERIFIED
+    "#attach-warranty-pane",  # VERIFIED (display:block once shown)
+    "#attach-popover-lgtbox.attach-dss-backdrop",  # VERIFIED
     "#attach-sidesheet-checkout-button",
     "#attach-accessory-cart-button",
     "#NATC_SMART_WAGON_CONF_MSG_SUCCESS",
@@ -126,6 +133,10 @@ ADD_TO_CART_CONFIRMATION = (
     "#attachDisplayAddBaseAlert",
     "#sc-active-cart",
 )
+# URL path fragments of the add-to-cart request the button issues (form target
+# `/cart/add-to-cart/ref=...` VERIFIED from the button's formaction; the AJAX endpoint the
+# side sheet uses is logged by the rehearsal and added here once observed).
+ADD_TO_CART_RESPONSE_MARKERS = ("/cart/add-to-cart", "/gp/add-to-cart", "/gp/aws/cart/add")
 # Proceed-to-checkout offered directly on the confirmation surface (skips the cart page).
 CONFIRMATION_PROCEED = (
     "#attach-sidesheet-checkout-button",
@@ -286,9 +297,13 @@ CHECKOUT_PAGE: dict[str, Field] = {
         ),
         "VERIFIED",
     ),
+    # Rehearsal 2026-09-25 21:40: a generic ":has-text('Condition')" candidate matched the footer
+    # sentence "...privacy notice and Conditions of use" and would have refused the order.
+    # Only explicit condition elements are read; the value is also sanity-checked in
+    # parse_checkout and otherwise inherited from the product page.
     "condition": Field(
         "condition",
-        ("[data-testid='item-condition']", ".lineitem-condition", ".a-size-small:has-text('Condition')"),
+        ("[data-testid='item-condition']", ".lineitem-condition", ".lineitem-container .item-condition"),
         "ASSUMED",
         note="live page renders no condition row; 'new' is inherited from the product page",
     ),

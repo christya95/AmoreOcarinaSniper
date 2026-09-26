@@ -218,6 +218,11 @@ ocarina setup                 # 🔐 open the dedicated browser; sign in to Amaz
 ocarina doctor                # 🩺 readiness: config, secret, profile, policy, selector table
 ocarina doctor --browser      # 🩺 + open the product page, print parsed offer + verdict
 ocarina doctor --browser --checkout-probe   # 🩺 + dry‑run into the review page, print every field (nothing submitted)
+ocarina doctor --browser --checkout-probe --probe-asin B0XXXXXXXX
+                              # 🎭 rehearsal: same path against a cheap in‑stock stand‑in, cart strategy
+                              #    forced, per‑step timings, redacted page dumps in runtime/artifacts/probe-*/.
+                              #    Policy is reported (it refuses the stand‑in), never bypassed; nothing is
+                              #    submitted. Stop the runner first (one browser per profile); empty the cart after.
 ocarina run                   # 🏃 always‑on runner, DRY‑RUN (never clicks Place order)
 ocarina run --live            # 🏃 real mode: submits when armed and all checks pass
 ocarina arm --minutes 120     # 🟢 arm for a bounded time (refused if policy is incomplete)
@@ -450,7 +455,8 @@ order can be placed. Coverage highlights:
 | Turbo‑checkout iframe, confirmation markers, order‑id pattern | ⚠️ assumed | Iframe is irrelevant on the cart path. Confirmation ambiguity ends in `UNKNOWN` (stop + push), never a second click. |
 | Cart page: `#sc-active-cart[data-cart-total-item-count]`, `ul[data-name="Active Items"]`, rows `.sc-list-item[data-asin][data-quantity][data-isselected]`, checkout checkbox `.sc-list-item-checkbox input`, gift checkbox (avoided), atomic stepper `fieldset[data-action=a-stepper][data-steppervalue]` + decrement `button[data-action=a-stepper-decrement]` (labelled **Delete** at qty 1, *Decrease quantity by one* above), `input[data-action=save-for-later]`, `input[data-action=delete-active]`, `#nav-cart-count`, `#sc-buy-box[data-quantity]` | ✅ live 2026‑09‑25 21:04 | Operator's signed‑in cart with one item (outerHTML of `#sc-active-cart`). Fixture `cart.html` mirrors it. |
 | Cart *Proceed to checkout*: `input[name='proceedToRetailCheckout'][data-feature-id='proceed-to-checkout-action'][aria-labelledby='sc-buy-box-ptc-button-announce']` | ✅ live 2026‑09‑25 21:16 | Operator paste of the button element. |
-| Add‑to‑cart side sheet ids (`#attach-sidesheet-checkout-button` …) | ⚠️ assumed | Fast path only; if none is found the bot goes via the cart page (verified) and loses ~1–2 s. |
+| Add‑to‑cart confirmation: button class `attach-dss-atc` adds via AJAX and opens `#attach-desktop-sideSheet[aria-modal]` with a **warranty upsell** (`#attach-warranty-pane`, *Add coverage* / *No thanks*) behind `#attach-popover-lgtbox`; no *Proceed to checkout* offered there | ✅ rehearsed 2026‑09‑25 21:47 in the bot's own profile | Detected as *visible surface* in 0.30 s. Before the fix none of the assumed ids existed and the bot waited out the full element timeout (review page at 11.4 s → now 3.0 s). The cart page follows; the upsell is never clicked. |
+| Side‑sheet *Proceed to checkout* (`#attach-sidesheet-checkout-button`) fast path | ⚠️ assumed / not offered | Kept as an opportunistic candidate; the verified path is via the cart page. |
 | Review‑page CVV / card‑input prompt (`payment_input`) | ⚠️ assumed (observed **absent** 2026‑09‑25 for the saved Visa) | Visibility‑checked only, so a wrong guess can never block a normal checkout; it can only miss a prompt (which then ends in `UNKNOWN` as before). |
 | Order‑history layout (`reconcile`), MFA selectors | ⚠️ assumed | |
 | Does the pre‑order page show *Buy Now* at all? | ❓ operator says **no** (2026‑09‑25) | Only *Pre‑order now* (add‑to‑cart slot). The adapter takes the cart path automatically whenever Buy Now is absent; the cart is tidied to the single target unit first. |
