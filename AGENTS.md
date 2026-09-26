@@ -290,7 +290,8 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
   come at any hour before Oct 29 — consider 4320 (3 days) and arming for the full window.
 
 ### Next up
-- [ ] Operator: decide `policy.max_arm_minutes` (12 h now; re-arm daily or raise the cap).
+- [x] Operator raised `policy.max_arm_minutes` to 4320 (3 days) 2026-09-25 22:49; armed until
+  2026-09-28 22:49. Re-arm every ~3 days (expiry pushes at T-30 min and at expiry).
 - [ ] After the first `watch_trigger` at 15 s cadence: confirm no `watch_challenge` in
   telemetry; if one appears, set `interval_s` back to 30.
 - [ ] Operator: install ntfy on iPhone, subscribe to the `[notify].ntfy_topic` in `config.toml`,
