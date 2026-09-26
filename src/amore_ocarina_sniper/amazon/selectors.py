@@ -101,6 +101,78 @@ PRODUCT_PAGE: dict[str, Field] = {
 # Buy Now on desktop may open a "turbo checkout" iframe instead of navigating.
 TURBO_IFRAME = ("#turbo-checkout-iframe", "iframe[name='turbo-checkout-iframe']")  # ASSUMED
 
+# ---------------------------------------------------------------------------- cart path
+# Pre-orders on this listing expose only "Pre-order now" (the add-to-cart slot), so the cart
+# path is the primary path, not a fallback. Container ids, the cart-count attribute, the
+# stepper/checkbox aria-labels and the "Proceed to checkout (N items)" wording were read from
+# the live (empty, signed-out) cart page's string table on 2026-09-25; item-row controls are
+# ASSUMED because an anonymous session can no longer hold items.
+CART_URL = "https://www.amazon.ca/gp/cart/view.html"
+NAV_CART_COUNT = "#nav-cart-count"  # VERIFIED (total units in cart)
+
+# After clicking add-to-cart, any of these means the add registered (side sheet, "added to
+# cart" page, or the cart itself). ASSUMED except NAV_CART_COUNT changing.
+ADD_TO_CART_CONFIRMATION = (
+    "#attach-sidesheet-checkout-button",
+    "#attach-accessory-cart-button",
+    "#NATC_SMART_WAGON_CONF_MSG_SUCCESS",
+    "#huc-v2-order-row-confirm-text",
+    "#sw-atc-confirmation",
+    "#attachDisplayAddBaseAlert",
+    "#sc-active-cart",
+)
+# Proceed-to-checkout offered directly on the confirmation surface (skips the cart page).
+CONFIRMATION_PROCEED = (
+    "#attach-sidesheet-checkout-button",
+    "#hlb-ptc-btn-native",
+    "#sw-ptc-form input[type='submit']",
+    "input[name='proceedToRetailCheckout']",
+)  # ASSUMED
+
+CART_PAGE = {
+    "active": "#sc-active-cart",  # VERIFIED
+    "saved": "#sc-saved-cart",  # VERIFIED
+    "buy_box": "#sc-buy-box",  # VERIFIED (data-quantity = units in active cart)
+    "rows": (
+        "#sc-active-cart .sc-list-item[data-asin]",
+        "#sc-active-cart [data-asin][data-itemid]",
+        "#sc-active-cart [data-asin]",
+    ),  # ASSUMED
+    "row_quantity_attr": "data-quantity",  # ASSUMED (legacy rows)
+    "row_quantity_label": "[aria-label^='Quantity is']",  # VERIFIED wording ("Quantity is {n}")
+    "row_quantity_select": "select[name='quantity']",  # ASSUMED (legacy rows)
+    "row_quantity_decrement": (
+        "[aria-label*='Decrease quantity' i]",  # VERIFIED wording
+        "input[data-a-selector='decrement']",
+        "[data-action='a-stepper-decrement']",
+    ),
+    "row_checkbox": (
+        "input[type='checkbox'][aria-label*='for checkout' i]",  # VERIFIED wording
+        "input[type='checkbox']",
+    ),
+    "row_save_for_later": (
+        "input[data-action='save-for-later']",
+        "[data-action='save-for-later'] input",
+        "input[value='Save for later']",
+        "input[aria-label*='Save for later' i]",
+        "[data-a-selector='save-for-later'] input",
+    ),  # ASSUMED
+    "row_delete": (
+        "input[data-action='delete']",
+        "input[data-action='delete-active']",
+        "[data-action='delete'] input",
+        "input[value='Delete']",
+        "input[aria-label*='Delete' i]",
+    ),  # ASSUMED
+    "proceed": (
+        "input[name='proceedToRetailCheckout']",
+        "#sc-buy-box-ptc-button input",
+        "#sc-buy-box-ptc-button",
+        "input[aria-labelledby='sc-buy-box-ptc-button-announce']",
+        "[data-feature-id='proceed-to-checkout-action'] input",
+    ),  # ASSUMED; label wording "Proceed to checkout (1 item)" VERIFIED
+}
+
 CHECKOUT_PAGE: dict[str, Field] = {
     "item_title": Field(
         "item_title",

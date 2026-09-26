@@ -200,6 +200,16 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
   default payment = Visa 4105, one small recent purchase with that card, install ntfy app and
   subscribe to the topic in `config.toml`, "robot first" rule for HotStock alerts.
 
+### Cart path made primary — 2026-09-25 21:00
+- Operator: the listing will **never show Buy Now** (pre-order only → "Pre-order now" is the
+  add-to-cart slot). Adapter now: click → wait for add confirmation (badge/side sheet/URL) →
+  badge == 1 and side-sheet *Proceed to checkout* visible → straight to checkout; otherwise
+  cart page → `_tidy_cart` (untick / Save for later / Delete non-target rows, step target qty
+  to 1, ≤ 4 passes, bounded) → Proceed. Target missing from cart → fail closed. Rows unreadable
+  → proceed, review-page gate decides. Cart container ids, badge, stepper/checkbox aria-labels
+  and PTC wording live-verified from the cart string table; item-row controls ASSUMED.
+  Fixtures `product_preorder_cart_only.html`, `cart.html` (7 variants); 7 new browser tests.
+
 ### Next up
 - [ ] Operator: install ntfy on iPhone, subscribe to the `[notify].ntfy_topic` in `config.toml`,
   run `ocarina notify-test`, confirm the push arrives.

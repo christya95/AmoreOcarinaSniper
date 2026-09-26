@@ -68,6 +68,7 @@ class AmazonAdapter:
         self._checkout_target = None  # Page or Frame holding the checkout UI
         self._last_offer_condition: str | None = None
         self._used_cart_path = False
+        self._cart_row_selector = S.CART_PAGE["rows"][-1]
 
     # ------------------------------------------------------------ lifecycle
     async def start(self) -> None:
@@ -197,13 +198,14 @@ class AmazonAdapter:
         if strategy == "buy_now" and offer.buy_now_available:
             await self._click_first(self.page, S.PRODUCT_PAGE["buy_now"].candidates)
         elif offer.add_to_cart_available:
+            # Pre-orders expose only "Pre-order now" (the add-to-cart slot): this is the main
+            # path for the target listing, not a fallback.
             self._used_cart_path = True
-            await self._click_first(self.page, S.PRODUCT_PAGE["add_to_cart"].candidates)
-            await self.page.goto("https://www.amazon.ca/gp/cart/view.html", wait_until="domcontentloaded")
-            await self._click_first(
-                self.page,
-                ("input[name='proceedToRetailCheckout']", "#sc-buy-box-ptc-button input"),
-            )
+            units = await self._add_to_cart_confirmed()
+            if not (units == 1 and await self._proceed_from_confirmation()):
+                await self.page.goto(S.CART_URL, wait_until="domcontentloaded")
+                await self._tidy_cart(cfg.target.asin)
+                await self._click_first(self.page, S.CART_PAGE["proceed"])
         else:
             raise ChallengeDetected(ChallengeKind.UNKNOWN_PAGE, "no purchase control available")
 
@@ -212,6 +214,168 @@ class AmazonAdapter:
         await self._raise_if_challenge(target)
         raw = await self._extract(target, CHECKOUT_SPEC)
         return parse_checkout(raw, product_condition=self._last_offer_condition)
+
+    # ------------------------------------------------------------ cart path
+    async def _cart_units(self) -> int | None:
+        """Total units in the cart per the nav badge (None when unreadable)."""
+        try:
+            text = await self.page.evaluate(
+                "(sel) => { const el = document.querySelector(sel); return el ? el.innerText : null; }",
+                S.NAV_CART_COUNT,
+            )
+        except Exception:
+            return None
+        digits = "".join(ch for ch in (text or "") if ch.isdigit())
+        return int(digits) if digits else None
+
+    async def _add_to_cart_confirmed(self) -> int | None:
+        """Click add-to-cart and wait until Amazon acknowledges it. Returns cart units."""
+        cfg = self.config
+        before = await self._cart_units()
+        await self._click_first(self.page, S.PRODUCT_PAGE["add_to_cart"].candidates)
+        deadline = time.monotonic() + cfg.checkout.element_timeout_ms / 1000
+        confirm_sel = ", ".join(S.ADD_TO_CART_CONFIRMATION)
+        while time.monotonic() < deadline:
+            url = self.page.url.lower()
+            if "/cart/" in url or "/huc/" in url:
+                break
+            try:
+                if await self.page.query_selector(confirm_sel):
+                    break
+            except Exception:
+                pass  # mid-navigation
+            units = await self._cart_units()
+            if units is not None and before is not None and units > before:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            log.warning("add to cart: no confirmation observed within timeout; checking the cart page")
+        await asyncio.sleep(0.15)  # let the badge settle
+        return await self._cart_units()
+
+    async def _proceed_from_confirmation(self) -> bool:
+        """Fast path: the confirmation surface offers Proceed to checkout. Caller guarantees
+        the cart holds exactly one unit, so this checkout can only contain our item."""
+        for sel in S.CONFIRMATION_PROCEED:
+            loc = self.page.locator(sel).first
+            try:
+                if await loc.count() and await loc.is_visible():
+                    await loc.click(timeout=self.config.checkout.element_timeout_ms)
+                    return True
+            except Exception:
+                continue
+        return False
+
+    async def _read_cart_rows(self) -> list[dict[str, Any]] | None:
+        """[{asin, qty, checkbox, checked, index}] for active-cart rows; None if unreadable.
+
+        Also remembers which row selector matched so locators index the same node list."""
+        result = await self.page.evaluate(
+            """(spec) => {
+              let rows = [], matched = null;
+              for (const sel of spec.rows) {
+                rows = Array.from(document.querySelectorAll(sel));
+                if (rows.length) { matched = sel; break; }
+              }
+              const num = (s) => { const m = (s || '').match(/\\d+/); return m ? parseInt(m[0], 10) : null; };
+              return { matched, rows: rows.map((row, i) => {
+                let qty = num(row.getAttribute(spec.qtyAttr));
+                if (qty === null) {
+                  const l = row.querySelector(spec.qtyLabel);
+                  if (l) qty = num(l.getAttribute('aria-label'));
+                }
+                if (qty === null) { const s = row.querySelector(spec.qtySelect); if (s) qty = num(s.value); }
+                let cb = null;
+                for (const sel of spec.checkbox) { cb = row.querySelector(sel); if (cb) break; }
+                return { asin: (row.dataset.asin || '').toUpperCase(), qty, checkbox: !!cb,
+                         checked: cb ? !!cb.checked : null, index: i };
+              }) };
+            }""",
+            {
+                "rows": list(S.CART_PAGE["rows"]),
+                "qtyAttr": S.CART_PAGE["row_quantity_attr"],
+                "qtyLabel": S.CART_PAGE["row_quantity_label"],
+                "qtySelect": S.CART_PAGE["row_quantity_select"],
+                "checkbox": list(S.CART_PAGE["row_checkbox"]),
+            },
+        )
+        self._cart_row_selector = result.get("matched") or S.CART_PAGE["rows"][-1]
+        return result.get("rows") or None
+
+    def _row_locator(self, index: int):
+        return self.page.locator(self._cart_row_selector).nth(index)
+
+    async def _click_in_row(self, row, candidates) -> bool:
+        for sel in candidates:
+            loc = row.locator(sel).first
+            try:
+                if await loc.count() and await loc.is_visible():
+                    await loc.click(timeout=2000)
+                    return True
+            except Exception:
+                continue
+        return False
+
+    async def _tidy_cart(self, target_asin: str) -> None:
+        """Make the active cart exactly [target × 1] before Proceed to checkout.
+
+        Other items are unticked (when the cart has per-item checkout checkboxes), else moved
+        to Save for later, else deleted. Target quantity above 1 is stepped down. Bounded by
+        element_timeout; the review-page policy check remains the real gate afterwards.
+        """
+        cfg = self.config
+        deadline = time.monotonic() + cfg.checkout.element_timeout_ms / 1000
+        passes = 0
+        while True:
+            rows = await self._read_cart_rows()
+            if rows is None:
+                units = await self._cart_units()
+                if units == 0:
+                    raise ChallengeDetected(ChallengeKind.UNKNOWN_PAGE, "cart is empty after add to cart")
+                log.warning("cart rows unreadable (units=%s); relying on the review-page check", units)
+                return
+            target_rows = [r for r in rows if r["asin"] == target_asin]
+            if not target_rows:
+                raise ChallengeDetected(
+                    ChallengeKind.UNKNOWN_PAGE, "target item not in cart after add to cart"
+                )
+            others = [r for r in rows if r["asin"] != target_asin]
+            has_checkboxes = all(r["checkbox"] for r in rows)
+            active_others = [r for r in others if not (has_checkboxes and r["checked"] is False)]
+            target = target_rows[0]
+            target_ok = (target["qty"] in (1, None)) and (not has_checkboxes or target["checked"])
+            if not active_others and target_ok and len(target_rows) == 1:
+                if passes:
+                    log.info("cart tidied in %d pass(es): only %s x1 remains active", passes, target_asin)
+                return
+            if time.monotonic() > deadline or passes >= 4:
+                raise ChallengeDetected(
+                    ChallengeKind.UNKNOWN_PAGE,
+                    f"cart could not be reduced to the single target item (rows={rows})",
+                )
+            passes += 1
+            log.info("cart needs tidying (pass %d): %s", passes, rows)
+            # Work from the bottom so removed rows do not shift the indexes of rows still to do.
+            for row in sorted(active_others, key=lambda r: -r["index"]):
+                loc = self._row_locator(row["index"])
+                if has_checkboxes and row["checked"]:
+                    if await self._click_in_row(loc, S.CART_PAGE["row_checkbox"]):
+                        continue
+                if not await self._click_in_row(loc, S.CART_PAGE["row_save_for_later"]):
+                    await self._click_in_row(loc, S.CART_PAGE["row_delete"])
+            if has_checkboxes and target["checked"] is False:
+                await self._click_in_row(self._row_locator(target["index"]), S.CART_PAGE["row_checkbox"])
+            if target["qty"] and target["qty"] > 1:
+                loc = self._row_locator(target["index"])
+                sel = loc.locator(S.CART_PAGE["row_quantity_select"]).first
+                if await sel.count():
+                    await sel.select_option("1")
+                else:
+                    for _ in range(min(target["qty"] - 1, 9)):
+                        if not await self._click_in_row(loc, S.CART_PAGE["row_quantity_decrement"]):
+                            break
+                        await asyncio.sleep(0.25)
+            await asyncio.sleep(0.4)  # optimistic DOM updates settle
 
     async def _wait_for_checkout_surface(self):
         """Wait (bounded) for either a checkout navigation or the turbo-checkout iframe."""
@@ -298,7 +462,8 @@ class AmazonAdapter:
             self._used_cart_path = False
             log.warning(
                 "abandon: the cart path was used; the item most likely remains in your Amazon cart. "
-                "Empty the cart before the next attempt or a cart checkout will show quantity 2."
+                "The next attempt's cart step will reduce the quantity to 1, but emptying the cart "
+                "by hand is cleaner and faster."
             )
         try:
             await self.page.goto(self.config.target.url, wait_until="domcontentloaded")

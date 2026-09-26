@@ -93,7 +93,8 @@ sequenceDiagram
     C->>A: open product page (never the alert link)
     A-->>C: ASIN, title, price, seller, ships‑from, availability, buttons
     C->>C: offer policy ✅ / ❌ fail closed
-    C->>A: Buy Now (or Add to cart → Checkout)
+    C->>A: Pre‑order now / Add to cart (Buy Now if present)
+    A-->>C: cart badge = 1 → side‑sheet Checkout · else cart page → tidy to [target × 1] → Proceed
     A-->>C: review page: item, qty, price, total, address, card
     C->>C: checkout policy ✅ / ❌ fail closed (screenshot + HTML saved)
     C->>C: kill switch? → persist submission intent
@@ -330,8 +331,11 @@ happen.
 
 | Situation | What the robot does | What you should do beforehand |
 | --- | --- | --- |
-| Other items already in your Amazon cart | **Buy Now** checks out only this item, so the cart is irrelevant. The **cart fallback** (only if Buy Now is missing) would show 2+ line items → refused. | Keep the cart **empty**. Cart is account‑wide; you can empty it from your phone. |
-| A refused *cart‑path* attempt left the console in the cart | Next cart attempt shows quantity 2 → refused. The runner log warns `abandon: the cart path was used…`. | Empty the cart before the next drop. |
+| The pre‑order page has no *Buy Now*, only *Pre‑order now* | That button is the add‑to‑cart slot, so the **cart path is the main path**: click → wait for Amazon's confirmation → if the cart badge shows exactly **1** unit and the side sheet offers *Proceed to checkout*, go straight there (cart page skipped) → otherwise open the cart, tidy it, proceed. | Nothing; handled. |
+| Other items already in your Amazon cart | On the cart page the robot **unticks** them (carts with per‑item checkout checkboxes), else moves them to **Save for later**, else deletes them; re‑reads; proceeds only when exactly the target at quantity 1 is active. Up to 4 passes, bounded by `element_timeout_ms`. The review‑page check (1 line item, qty 1) still runs afterwards. | Still keep the cart **empty**: it skips the cart page and saves ~1–2 s. |
+| The console is already in the cart (leftover from a refused attempt) | Quantity becomes 2; the robot steps it back to **1** with the stepper (or the quantity dropdown). | Empty the cart after any refused attempt; the runner log says so (`abandon: the cart path was used…`). |
+| Add‑to‑cart clicked but the cart does not contain the console | `target item not in cart after add to cart` → refused before checkout, screenshot + HTML saved. | Send the artifacts; no auto‑retry by design. |
+| Cart rows cannot be read at all (selector drift) | Logged; the robot proceeds and lets the review‑page policy decide (2 items / qty 2 → refused). | Send the artifacts. |
 | Review page shows a different address or card | Refused (`shipping address does not match` / `payment method does not match`). The robot never changes selections. | In Amazon → *Your Addresses* set **1447 Sycamore** as default; *Your Payments → Wallet* set the **Visa ending 4105** as default. Buy Now uses the defaults. |
 | Card rendered as `Visa •••• 4105` instead of `ending in 4105` | Accepted: a fragment ending in four digits also matches masked renderings of those exact digits. | Nothing. |
 | Amazon asks to re‑enter the security code (CVV) | A *visible* card input on the review page is refused **before** the click (`payment requires manual input`) with screenshot + HTML, instead of ending in `UNKNOWN` after it. The robot never types card data. | Use the card on Amazon once shortly before the drop (any small order) so it is “recently verified”. |
@@ -405,7 +409,7 @@ someone else's alert bot for the first signal.
 ## 🧪 Tests
 
 ```powershell
-python -m pytest -q          # 209 tests, ~80 s (headless Chromium for fixture‑driven tests)
+python -m pytest -q          # 216 tests, ~85 s (headless Chromium for fixture‑driven tests)
 ruff check src tests
 ```
 
@@ -443,9 +447,11 @@ order can be placed. Coverage highlights:
 | *Ships from* row on an Amazon‑sold pre‑order | ✅ observed **absent** | Fulfillment is now inferred from Amazon‑as‑seller in that case. |
 | Pre‑order availability text | ✅ live 2026‑09‑25 | *"This item will be released on October 29, 2026. Pre‑order now."* |
 | Checkout review page (`CHECKOUT_PAGE` selectors), turbo‑checkout iframe, confirmation markers, order‑id pattern | ⚠️ **assumed** | Fail‑closed. Never seen live. On refusal the runner saves a full‑page screenshot + all‑frame HTML to `runtime/artifacts/` and the full field dump to telemetry. |
+| Cart page: `#sc-active-cart`, `#sc-saved-cart`, `#sc-buy-box[data-quantity]`, `#nav-cart-count`, stepper aria‑labels *Increase/Decrease quantity by one* / *Quantity is N*, per‑item checkbox *Select … for checkout*, *Proceed to checkout (N items)* wording | ✅ live 2026‑09‑25 | Read from the live cart page's string table (signed‑out, empty cart). |
+| Cart item rows (`.sc-list-item[data-asin][data-quantity]`), *Save for later* / *Delete* inputs, `input[name='proceedToRetailCheckout']`, add‑to‑cart side sheet ids | ⚠️ assumed | An anonymous session can no longer hold items. Layered candidates; if rows are unreadable the review‑page check is still the gate. |
 | Review‑page CVV / card‑input prompt (`payment_input`) | ⚠️ assumed | Visibility‑checked only, so a wrong guess can never block a normal checkout; it can only miss a prompt (which then ends in `UNKNOWN` as before). |
 | Order‑history layout (`reconcile`), MFA selectors | ⚠️ assumed | |
-| Does *Buy Now* show every policy field on this listing? | ❓ unknown | If not, `checkout.strategy = "cart"`. Unrelated cart items then fail closed by design. |
+| Does the pre‑order page show *Buy Now* at all? | ❓ operator says **no** (2026‑09‑25) | Only *Pre‑order now* (add‑to‑cart slot). The adapter takes the cart path automatically whenever Buy Now is absent; the cart is tidied to the single target unit first. |
 
 `ocarina doctor` prints the live selector table with each field's status.
 

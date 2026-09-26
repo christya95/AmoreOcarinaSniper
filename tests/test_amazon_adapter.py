@@ -27,9 +27,10 @@ AMZ = FIXTURES / "amazon"
 
 
 class Routing:
-    def __init__(self, product="product_in_stock.html", checkout="checkout_review"):
+    def __init__(self, product="product_in_stock.html", checkout="checkout_review", cart="clean"):
         self.product = product
         self.checkout = checkout
+        self.cart = cart
         self.requests: list[str] = []
 
     async def handle(self, route):
@@ -38,6 +39,8 @@ class Routing:
         path = urlparse(url).path
         if path.startswith("/dp/"):
             file = self.product
+        elif path.startswith("/gp/cart/view.html"):
+            file = "cart.html"
         elif path.startswith("/gp/buy/spc/handlers/display.html"):
             file = "checkout.html"
         elif path.startswith("/gp/buy/thankyou"):
@@ -56,7 +59,9 @@ class Routing:
 async def start_adapter(config, routing: Routing, *, dry_run=True) -> AmazonAdapter:
     adapter = AmazonAdapter(config, dry_run=dry_run, headless=True)
     await adapter.start()
-    await adapter._context.add_init_script(f"window.__checkoutFixture = {routing.checkout!r};")
+    await adapter._context.add_init_script(
+        f"window.__checkoutFixture = {routing.checkout!r}; window.__cartFixture = {routing.cart!r};"
+    )
     await adapter._context.route("https://www.amazon.ca/**", routing.handle)
     return adapter
 
@@ -222,6 +227,80 @@ async def test_checkout_variants_rejected(config, variant, fragment):
     decision = evaluate_checkout(snap, config.policy, config.target)
     assert not decision.ok
     assert any(fragment in r for r in decision.reasons), decision.reasons
+
+
+# ----------------------------------------------------------------- cart path (pre-orders)
+PREORDER_CART_ONLY = "product_preorder_cart_only.html"
+
+
+def _preorder_config(config):
+    from dataclasses import replace
+
+    return replace(config, policy=replace(config.policy, allow_preorder=True))
+
+
+async def test_preorder_without_buy_now_uses_cart_fast_path(config):
+    """Only 'Pre-order now' exists; cart ends with our single unit; side sheet -> checkout."""
+    routing = Routing(product=PREORDER_CART_ONLY, cart="clean")
+    adapter = await start_adapter(_preorder_config(config), routing)
+    try:
+        offer = await adapter.verify_offer()
+        assert offer.is_preorder and not offer.buy_now_available and offer.add_to_cart_available
+        assert evaluate_offer(offer, _preorder_config(config).policy, config.target).ok
+        snap = await adapter.prepare_checkout(offer)
+    finally:
+        await adapter.stop()
+    assert not any("/gp/cart/view.html" in u for u in routing.requests)  # cart page skipped
+    assert snap.line_item_count == 1 and snap.quantity == 1 and snap.asin == "B0HJ6F8L6V"
+    assert evaluate_checkout(snap, _preorder_config(config).policy, config.target).ok
+
+
+async def test_preorder_cart_page_when_no_side_sheet(config):
+    routing = Routing(product=PREORDER_CART_ONLY, cart="clean_no_sidesheet")
+    adapter = await start_adapter(_preorder_config(config), routing)
+    try:
+        snap = await adapter.prepare_checkout(await adapter.verify_offer())
+    finally:
+        await adapter.stop()
+    assert any("/gp/cart/view.html" in u for u in routing.requests)
+    assert snap.line_item_count == 1 and snap.quantity == 1
+
+
+@pytest.mark.parametrize("variant", ["extra_item", "qty_two", "checkboxes"])
+async def test_cart_is_tidied_to_single_target_unit(config, variant):
+    """Unrelated item / leftover quantity / checkbox cart -> exactly [target x1] at checkout."""
+    routing = Routing(product=PREORDER_CART_ONLY, cart=variant)
+    adapter = await start_adapter(_preorder_config(config), routing)
+    try:
+        snap = await adapter.prepare_checkout(await adapter.verify_offer())
+        page_state = await adapter.page.evaluate("location.search")
+    finally:
+        await adapter.stop()
+    assert "fixture=checkout_review" in page_state, page_state  # cart.html derived this from what was left
+    assert snap.line_item_count == 1 and snap.quantity == 1 and snap.asin == "B0HJ6F8L6V"
+    assert evaluate_checkout(snap, _preorder_config(config).policy, config.target).ok
+
+
+async def test_cart_without_target_fails_closed(config):
+    routing = Routing(product=PREORDER_CART_ONLY, cart="missing_target")
+    adapter = await start_adapter(_preorder_config(config), routing)
+    try:
+        with pytest.raises(ChallengeDetected) as exc:
+            await adapter.prepare_checkout(await adapter.verify_offer())
+    finally:
+        await adapter.stop()
+    assert "target item not in cart" in str(exc.value)
+    assert not any("/gp/buy/spc" in u for u in routing.requests)  # never reached checkout
+
+
+async def test_unreadable_cart_rows_defer_to_review_page(config):
+    routing = Routing(product=PREORDER_CART_ONLY, cart="unreadable_rows")
+    adapter = await start_adapter(_preorder_config(config), routing)
+    try:
+        snap = await adapter.prepare_checkout(await adapter.verify_offer())
+    finally:
+        await adapter.stop()
+    assert snap.line_item_count == 1  # review page is still the gate
 
 
 async def test_masked_payment_rendering_still_matches(config):

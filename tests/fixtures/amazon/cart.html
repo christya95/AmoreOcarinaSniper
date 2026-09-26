@@ -1,0 +1,101 @@
+<!doctype html>
+<!--
+  Amazon.ca cart fixture. Container ids (#sc-active-cart, #sc-saved-cart, #sc-buy-box
+  data-quantity), the quantity-stepper aria-labels ("Quantity is N", "Decrease quantity by
+  one"), the per-item checkbox aria-label ("Select … for checkout") and the "Proceed to
+  checkout (N items)" wording were read from the live cart page on 2026-09-25. Item-row
+  structure (.sc-list-item[data-asin][data-quantity], Save for later / Delete inputs) is the
+  long-standing markup and is ASSUMED. Variants via window.__cartFixture (see
+  product_preorder_cart_only.html). Proceed navigates to the checkout fixture with a variant
+  derived from what is still active in the cart, so a badly tidied cart is caught downstream.
+-->
+<html><head><meta charset="utf-8"><title>Amazon.ca Shopping Cart</title></head>
+<body>
+<a id="nav-cart"><span id="nav-cart-count">0</span></a>
+<form id="activeCartViewForm">
+  <div id="sc-active-cart"><div id="sc-active-items"></div></div>
+  <div id="sc-saved-cart"><div id="sc-saved-cart-items"></div></div>
+  <div id="sc-buy-box" data-quantity="0">
+    <span id="sc-subtotal-label-buybox">Subtotal (0 items):</span>
+    <span id="sc-buy-box-ptc-button" class="a-button"><input name="proceedToRetailCheckout" type="submit" class="a-button-input" value="Proceed to checkout"></span>
+  </div>
+</form>
+<script>
+  (function () {
+    const variant = window.__cartFixture || 'clean';
+    const TARGET = 'B0HJ6F8L6V', EXTRA = 'B0EXTRA0001';
+    const withCheckboxes = variant === 'checkboxes';
+    const items = [];
+    if (variant === 'clean' || variant === 'clean_no_sidesheet') items.push({ asin: TARGET, qty: 1, title: 'Nintendo Switch 2 Zelda 40th' });
+    if (variant === 'extra_item' || variant === 'checkboxes') {
+      items.push({ asin: EXTRA, qty: 1, title: 'USB-C Cable 2m' });
+      items.push({ asin: TARGET, qty: 1, title: 'Nintendo Switch 2 Zelda 40th' });
+    }
+    if (variant === 'qty_two') items.push({ asin: TARGET, qty: 2, title: 'Nintendo Switch 2 Zelda 40th' });
+    if (variant === 'missing_target') items.push({ asin: EXTRA, qty: 1, title: 'USB-C Cable 2m' });
+    if (variant === 'unreadable_rows') items.push({ asin: null, qty: 1, title: 'Nintendo Switch 2 Zelda 40th' });
+
+    const active = document.getElementById('sc-active-items');
+    const saved = document.getElementById('sc-saved-cart-items');
+    const badge = document.getElementById('nav-cart-count');
+    const buyBox = document.getElementById('sc-buy-box');
+
+    function render() {
+      const rows = Array.from(active.querySelectorAll('.sc-list-item'));
+      const selected = rows.filter(r => !withCheckboxes || r.querySelector('input[type=checkbox]').checked);
+      const units = rows.reduce((n, r) => n + parseInt(r.dataset.quantity, 10), 0);
+      badge.textContent = String(units);
+      buyBox.dataset.quantity = String(units);
+      const selUnits = selected.reduce((n, r) => n + parseInt(r.dataset.quantity, 10), 0);
+      document.getElementById('sc-subtotal-label-buybox').textContent = 'Subtotal (' + selUnits + ' items):';
+      document.querySelector('input[name=proceedToRetailCheckout]').value =
+        'Proceed to checkout (' + selUnits + ' item' + (selUnits === 1 ? '' : 's') + ')';
+    }
+
+    function row(item) {
+      const div = document.createElement('div');
+      div.className = 'sc-list-item';
+      if (item.asin) div.setAttribute('data-asin', item.asin);
+      div.setAttribute('data-itemid', 'I' + Math.random().toString(36).slice(2, 8));
+      div.setAttribute('data-quantity', String(item.qty));
+      div.innerHTML =
+        (withCheckboxes ? '<input type="checkbox" aria-label="Select ' + item.title + ' for checkout" checked>' : '') +
+        '<span class="sc-product-title">' + item.title + '</span>' +
+        '<div class="sc-quantity-stepper"><button type="button" aria-label="Decrease quantity by one">−</button>' +
+        '<span aria-label="Quantity is ' + item.qty + '">' + item.qty + '</span>' +
+        '<button type="button" aria-label="Increase quantity by one">+</button></div>' +
+        '<input type="button" data-action="save-for-later" value="Save for later">' +
+        '<input type="button" data-action="delete" value="Delete">';
+      div.querySelector('[aria-label="Decrease quantity by one"]').addEventListener('click', function () {
+        const q = Math.max(1, parseInt(div.dataset.quantity, 10) - 1);
+        setTimeout(function () {
+          div.dataset.quantity = String(q);
+          const lbl = div.querySelector('[aria-label^="Quantity is"]');
+          lbl.setAttribute('aria-label', 'Quantity is ' + q); lbl.textContent = String(q);
+          render();
+        }, 150);
+      });
+      div.querySelector('[data-action="save-for-later"]').addEventListener('click', function () {
+        setTimeout(function () { saved.appendChild(div); render(); }, 150);
+      });
+      div.querySelector('[data-action="delete"]').addEventListener('click', function () {
+        setTimeout(function () { div.remove(); render(); }, 150);
+      });
+      if (withCheckboxes) div.querySelector('input[type=checkbox]').addEventListener('change', render);
+      return div;
+    }
+    items.forEach(i => active.appendChild(row(i)));
+    render();
+
+    document.getElementById('activeCartViewForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      const rows = Array.from(active.querySelectorAll('.sc-list-item'))
+        .filter(r => !withCheckboxes || r.querySelector('input[type=checkbox]').checked);
+      let fixture = window.__checkoutFixture || 'checkout_review';
+      if (rows.length > 1) fixture = 'two_items';
+      else if (rows.length === 1 && parseInt(rows[0].dataset.quantity, 10) > 1) fixture = 'qty_two';
+      location.href = '/gp/buy/spc/handlers/display.html?fixture=' + fixture;
+    });
+  })();
+</script>
+</body></html>

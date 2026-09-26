@@ -1,0 +1,54 @@
+<!doctype html>
+<!--
+  Pre-order buy box with ONLY "Pre-order now" in the add-to-cart slot and no Buy Now button
+  (operator's observation for the target listing, 2026-09-25). Clicking it simulates Amazon's
+  AJAX add: the nav cart badge increments and, for the `clean` cart variant, a side sheet with
+  a Proceed to checkout button appears. Cart variants are selected via window.__cartFixture:
+    clean               cart ends with exactly our unit; side sheet offers checkout (fast path)
+    clean_no_sidesheet  same cart, no side sheet -> cart page -> proceed
+    extra_item          an unrelated item is already in the cart
+    qty_two             our item was already in the cart (quantity becomes 2)
+    checkboxes          unrelated item present; cart has per-item checkout checkboxes
+    missing_target      the add silently failed; cart holds only an unrelated item
+    unreadable_rows     cart rows carry no data-asin (selector drift)
+-->
+<html><head><meta charset="utf-8"><title>Nintendo Switch™ 2 – The Legend of Zelda™ – 40th Anniversary Edition : Amazon.ca</title></head>
+<body>
+<div id="nav-link-accountList"><span>Hello, Josua</span></div>
+<a id="nav-cart"><span id="nav-cart-count">0</span></a>
+<form id="addToCart">
+  <input type="hidden" id="ASIN" value="B0HJ6F8L6V">
+  <h1 id="title"><span id="productTitle">Nintendo Switch™ 2 – The Legend of Zelda™ – 40th Anniversary Edition</span></h1>
+  <div id="desktop_buybox"><div id="buybox"><div id="qualifiedBuybox">
+    <div id="corePrice_feature_div"><span class="a-price"><span class="a-offscreen">$709.99</span></span></div>
+    <div id="availability"><span class="a-size-medium a-color-success">This item will be released on October 29, 2026.</span><span> Pre-order now.</span></div>
+    <select id="quantity" name="quantity"><option value="1" selected>1</option></select>
+    <div id="addToCart_feature_div"><span id="submit.add-to-cart" class="a-button"><input id="add-to-cart-button" name="submit.add-to-cart" title="Pre-order Now" class="a-button-input" type="button" value="Pre-order Now"></span></div>
+    <div id="merchantInfoFeature_feature_div"><span class="offer-display-feature-label">Sold by</span> <span class="offer-display-feature-text-message">Amazon.ca</span></div>
+    <div id="renewedSingleOfferCaption_feature_div"></div>
+  </div></div></div>
+</form>
+<div id="sidesheet"></div>
+<script>
+  (function () {
+    const variant = window.__cartFixture || 'clean';
+    const before = { clean: 0, clean_no_sidesheet: 0, extra_item: 1, qty_two: 1, checkboxes: 1, missing_target: 0, unreadable_rows: 0 }[variant] ?? 0;
+    const badge = document.getElementById('nav-cart-count');
+    badge.textContent = String(before);
+    document.getElementById('add-to-cart-button').addEventListener('click', function () {
+      // AJAX-style add: no navigation; badge updates ~200 ms later like Amazon's does.
+      setTimeout(function () {
+        badge.textContent = String(before + 1);
+        if (variant === 'clean') {
+          const sheet = document.getElementById('sidesheet');
+          sheet.innerHTML = '<div id="attach-sidesheet-view-cart-button"><span>Cart subtotal (1 item): $709.99</span></div>' +
+            '<input id="attach-sidesheet-checkout-button" type="button" value="Proceed to checkout (1 item)">';
+          document.getElementById('attach-sidesheet-checkout-button').addEventListener('click', function () {
+            location.href = '/gp/buy/spc/handlers/display.html?fixture=' + (window.__checkoutFixture || 'checkout_review');
+          });
+        }
+      }, 200);
+    });
+  })();
+</script>
+</body></html>
