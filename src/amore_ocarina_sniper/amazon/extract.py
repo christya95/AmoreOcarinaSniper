@@ -215,8 +215,11 @@ def parse_checkout(raw: dict[str, Any], *, product_condition: str | None) -> Che
     condition = _clean_prefix(_val(raw, "condition"), "condition")
     if condition is None and product_condition == "new":
         condition = "new"
+    # Live review page: the ASIN is the *text* of a hidden data-testid span; legacy layouts
+    # carried it as a data-asin attribute instead. Either is accepted, text first.
+    asin_text = _val(raw, "item_asin") or _val(raw, "item_asin_attr") or ""
     return CheckoutSnapshot(
-        asin=(_val(raw, "item_asin") or "").upper() or None,
+        asin=asin_text.upper() or None,
         title=_val(raw, "item_title"),
         seller=_clean_prefix(_val(raw, "seller"), "sold by"),
         fulfiller=_clean_prefix(_val(raw, "fulfiller"), "ships from"),

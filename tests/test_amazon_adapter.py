@@ -192,9 +192,18 @@ async def test_checkout_review_parses_and_dry_run_refuses_submit(config):
         snap = await adapter.prepare_checkout(offer)
         assert snap.asin == "B0HJ6F8L6V" and snap.quantity == 1 and snap.line_item_count == 1
         assert snap.item_price == Decimal("709.99") and snap.total == Decimal("802.29")
-        assert snap.seller == "Amazon.ca" and snap.fulfiller == "Amazon" and snap.condition == "new"
-        assert "123 Maple Street" in snap.address_text and "ending in 4242" in snap.payment_text
+        assert snap.seller == "Amazon.ca" and snap.fulfiller == "Amazon.ca" and snap.condition == "new"
+        # Live layout: "123, Maple Street, Milton, ..." and "Paying with Visa 4242".
+        assert "Maple Street" in snap.address_text and "Visa 4242" in snap.payment_text
         assert snap.place_order_available
+        # Every verified review-page selector must be the one that matched (not a legacy fallback).
+        matched = {k: v.get("selector") for k, v in snap.raw["fields"].items()}
+        assert matched["item_asin"] == "[data-testid^='Item_asin_']"
+        assert matched["quantity"].startswith("fieldset[name='checkout-quantity-stepper']")
+        assert matched["total"].startswith("#subtotals-marketplace-table")
+        assert matched["seller"] == ".lineitem-seller-section"
+        assert matched["address"] == "#deliver-to-address-text"
+        assert matched["payment"] == "#selected-payment-methods-list-container"
         assert evaluate_checkout(snap, config.policy, config.target).ok
         with pytest.raises(DryRunRefusal):
             await adapter.submit_order()
@@ -215,6 +224,7 @@ async def test_checkout_review_parses_and_dry_run_refuses_submit(config):
         ("cvv_prompt", "payment requires manual input"),
         ("third_party_seller", "seller not allowed"),
         ("qty_two", "quantity 2"),
+        ("blocked", "place order control not available"),
     ],
 )
 async def test_checkout_variants_rejected(config, variant, fragment):

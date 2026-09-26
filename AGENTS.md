@@ -100,9 +100,11 @@ Confirm assumptions against real pages without submitting anything.
   Finding: the alert app uses a **default avatar** → no user id in the DOM → *Sender user id*
   must stay empty for this author (fails closed otherwise). Fixed name matching to strip the
   badge; added sticky *Last skip* row to the popup.
-- [!] Checkout review page (`CHECKOUT_PAGE` selectors, turbo-checkout iframe, confirmation
-  markers, order-id pattern) via `ocarina doctor --browser --checkout-probe` — needs signed-in
-  session **and** the item in stock.
+- [x] Checkout review page (2026-09-25 21:19, operator's redacted HTML of a live signed-in
+  `/checkout/p/<id>/spc` with a third-party item): every `CHECKOUT_PAGE` field verified; six
+  assumed fields (ASIN, quantity, total, seller, address, payment) would have read empty →
+  fixed. Still assumed: confirmation markers, order-id pattern, turbo iframe (irrelevant on
+  the cart path).
 - [x] Amazon-as-seller display text: `Amazon.ca` (live 2026-09-25 03:52). No *Ships from* row
   on the Amazon-sold pre-order; fulfiller now inferred from seller in that case.
 - [ ] Does Buy Now on this listing expose every policy field? If not, switch default
@@ -213,8 +215,24 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
   decrement `button` is **Delete** at qty 1), `input[data-action=save-for-later|delete-active]`
   all VERIFIED; fixture rebuilt to mirror it; decrement is now one click per pass (≤ 6 passes).
   21:16 operator pasted the cart *Proceed to checkout* input → VERIFIED (`name`, `data-feature-id`,
-  `aria-labelledby` all match the first candidates). Still ASSUMED: add-to-cart side-sheet ids,
-  every review-page field, confirmation markers, order-history URL — operator verifying next.
+  `aria-labelledby` all match the first candidates).
+
+### Review page verified — 2026-09-25 21:19
+- Operator ran a redacting DevTools snippet on the live review page (GameSir item, saved Visa)
+  → `runtime/artifacts/review-page.html` (git-ignored). Findings: ASIN is *text* in
+  `span[data-testid^=Item_asin_]` (no `data-asin` anywhere); quantity is an atomic stepper
+  (`fieldset[name=checkout-quantity-stepper]`, value in `[data-a-selector=inner-value]`);
+  total in `[data-shimmer-target=ordertotals-amount]` inside the only bold `<li>`; seller
+  `.lineitem-seller-section`; address `#deliver-to-address-text` ("1447, Sycamore Garden, …"
+  — comma survives `normalize_text`, config fragment still matches); payment
+  `#selected-payment-methods-list-container` ("Paying with Visa 4105" — matched via the
+  last-4 fallback); six `input[name=placeYourOrder1]`, four of them **disabled** blockers →
+  candidates now `:not([disabled])`; no condition row; no CVV prompt.
+- **Six of eleven assumed fields would have read empty → the order would have been refused.**
+  Selectors fixed, `item_asin_attr` legacy fallback added, `checkout.html` fixture rebuilt to
+  mirror the live markup (+ `blocked` variant), review test asserts the *verified* selector
+  matched for each field. Still ASSUMED: add-to-cart side-sheet ids, confirmation markers,
+  order-history URL.
   Fixtures `product_preorder_cart_only.html`, `cart.html` (8 variants); 8 browser tests.
 
 ### Next up

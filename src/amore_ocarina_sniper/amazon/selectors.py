@@ -1,9 +1,10 @@
 """Centralized Amazon.ca selectors with verification status.
 
 Verification legend (see README "Live-verified selectors"):
-  VERIFIED   – observed live on www.amazon.ca desktop (signed out) on 2026-09-24 against
-               ASIN B0HJ6F8L6V (unavailable state) and an in-stock third-party listing
-               (B0HJPFB24P) for buy-box structure.
+  VERIFIED   – observed live on www.amazon.ca desktop: product page 2026-09-24/25 (signed out
+               and signed in) against ASIN B0HJ6F8L6V and an in-stock third-party listing
+               (B0HJPFB24P); cart page and checkout review page 2026-09-25 from the
+               operator's signed-in session (outerHTML pastes, one third-party item).
   ASSUMED    – based on long-standing Amazon markup that could not be observed in this
                environment (requires an authenticated session / in-stock target).
                Every ASSUMED field is read fail-closed: if none of the candidates yields
@@ -181,118 +182,142 @@ CART_PAGE = {
     ),
 }
 
+# Review page ("SPC", /checkout/p/<purchase-id>/spc). VERIFIED entries were read from the
+# operator's signed-in review page on 2026-09-25 21:19 (one third-party item, saved Visa, no
+# CVV prompt). The legacy candidates that follow them are kept for A/B layouts.
 CHECKOUT_PAGE: dict[str, Field] = {
     "item_title": Field(
         "item_title",
         (
+            ".lineitem-title-text",  # VERIFIED
+            "[id^='checkout-item-block-item-primary-title-']",  # VERIFIED
             "[data-testid='item-title']",
-            ".lineitem-title-text",
-            ".a-row .a-spacing-small .a-text-bold[data-asin]",
             ".product-title",
             "#spc-orders .a-truncate-full",
             ".item-row .a-text-bold",
         ),
-        "ASSUMED",
+        "VERIFIED",
     ),
+    # Live: <span data-testid="Item_asin_0_0_0" class="aok-hidden">B0GJZ8WJD9</span> — the ASIN
+    # is *text*, there is no data-asin attribute anywhere on the page.
     "item_asin": Field(
         "item_asin",
-        ("[data-asin]", "input[name*='asin' i]", "[data-item-asin]"),
+        ("[data-testid^='Item_asin_']",),  # VERIFIED
+        "VERIFIED",
+    ),
+    "item_asin_attr": Field(
+        "item_asin_attr",
+        ("[data-asin]", "[data-item-asin]"),
         "ASSUMED",
         attr="data-asin",
+        note="legacy fallback only; consulted when item_asin is empty",
     ),
     "line_items": Field(
         "line_items",
         (
+            ".lineitem-container",  # VERIFIED (one per line item)
+            "[data-testid^='Item_asin_']",  # VERIFIED
             "[data-testid='line-item']",
-            ".lineitem-container",
             ".a-box.spc-item",
             "#spc-orders .item-row",
             "[data-asin][data-quantity]",
         ),
-        "ASSUMED",
+        "VERIFIED",
         note="count of matches = line item count",
     ),
+    # Live: atomic stepper <fieldset name="checkout-quantity-stepper" data-steppervalue="1">
+    # with the value rendered as text in [data-a-selector='inner-value'] and a live region.
     "quantity": Field(
         "quantity",
         (
+            "fieldset[name='checkout-quantity-stepper'] [data-a-selector='inner-value']",  # VERIFIED
+            "fieldset[name='checkout-quantity-stepper'] .a-stepper-value-live",  # VERIFIED
+            "[id^='lineItemQuantity_'] [data-a-selector='inner-value']",  # VERIFIED
             "[data-testid='item-quantity']",
             ".quantity-display",
             "select[name='quantity']",
             ".a-dropdown-prompt",
-            "[data-quantity]",
         ),
-        "ASSUMED",
+        "VERIFIED",
     ),
     "item_price": Field(
         "item_price",
         (
+            ".lineitem-price-text",  # VERIFIED
             "[data-testid='item-price']",
-            ".lineitem-price-text",
             ".a-color-price.a-text-bold",
             "#spc-orders .a-color-price",
         ),
-        "ASSUMED",
+        "VERIFIED",
     ),
+    # Live: the "Order Total:" row is the only bold <li> in #subtotals-marketplace-table and the
+    # amount sits in [data-shimmer-target='ordertotals-amount']; the same amount is repeated
+    # next to the bottom Place-order button in .grand-total-cell.
     "total": Field(
         "total",
         (
+            # VERIFIED (both):
+            "#subtotals-marketplace-table .a-text-bold [data-shimmer-target='ordertotals-amount']",
+            ".grand-total-cell [data-shimmer-target='ordertotals-amount']",
             "[data-testid='order-total'] .a-color-base",
             ".grand-total-price",
-            "#subtotals-marketplace-table .grand-total-price",
             "td.a-text-right.grand-total-price",
             "#order-summary-total",
         ),
-        "ASSUMED",
+        "VERIFIED",
     ),
     "seller": Field(
         "seller",
         (
+            ".lineitem-seller-section",  # VERIFIED ("Sold by <name>")
             "[data-testid='sold-by']",
             ".lineitem-soldby",
-            "#spc-orders .a-size-small:has-text('Sold by')",
             ".a-size-small.a-color-secondary:has-text('Sold by')",
         ),
-        "ASSUMED",
+        "VERIFIED",
     ),
     "fulfiller": Field(
         "fulfiller",
         (
+            ".product-description-column .a-size-small:has-text('Ships from')",  # VERIFIED
             "[data-testid='ships-from']",
             ".lineitem-shipsfrom",
             ".a-size-small:has-text('Ships from')",
         ),
-        "ASSUMED",
+        "VERIFIED",
     ),
     "condition": Field(
         "condition",
         ("[data-testid='item-condition']", ".lineitem-condition", ".a-size-small:has-text('Condition')"),
         "ASSUMED",
-        note="absent => treated as 'new' only when the product-page condition was new",
+        note="live page renders no condition row; 'new' is inherited from the product page",
     ),
     "address": Field(
         "address",
         (
+            "#deliver-to-address-text",  # VERIFIED ("1447, Sycamore Garden, Milton, Ontario, L9E1P8, Canada")
+            "#checkout-deliveryAddressPanel",  # VERIFIED (name + address)
             "[data-testid='Address_selectedAddress']",
             "#shipToAddressBlock",
             ".displayAddressDiv",
             "#address-book-entry-0",
-            ".ship-to-this-address",
-            "#checkout-deliver-to-section",
             "[data-testid='delivery-address']",
         ),
-        "ASSUMED",
+        "VERIFIED",
     ),
     "payment": Field(
         "payment",
         (
+            "#selected-payment-methods-list-container",  # VERIFIED ("Paying with Visa 4105")
+            "#payment-option-text-default",  # VERIFIED
+            "[id^='selected-payment-method-']",  # VERIFIED
+            "#checkout-payment-option-panel",  # VERIFIED (fallback: whole panel text)
             "[data-testid='payment-method']",
             "#payment-information",
             ".payment-method-details",
-            "#selected-payment-method",
-            "#checkout-payment-section",
             ".pmts-instrument-display-detail",
         ),
-        "ASSUMED",
+        "VERIFIED",
     ),
     "payment_input": Field(
         "payment_input",
@@ -308,18 +333,21 @@ CHECKOUT_PAGE: dict[str, Field] = {
         "ASSUMED",
         note="checked for *visibility* only; a hidden widget input never fails the attempt",
     ),
+    # Live: six <input id="placeOrder" name="placeYourOrder1"> — the enabled top/bottom
+    # buttons plus four *disabled* blocker/spinner copies that Amazon swaps in while a
+    # selection is being updated. Never target a disabled one.
     "place_order": Field(
         "place_order",
         (
-            "input[name='placeYourOrder1']",
-            "#submitOrderButtonId input",
-            "#bottomSubmitOrderButtonId input",
+            "input[name='placeYourOrder1']:not([disabled])",  # VERIFIED
+            "#submitOrderButtonId input[name='placeYourOrder1']:not([disabled])",  # VERIFIED
+            "#bottomSubmitOrderButtonId input[name='placeYourOrder1']:not([disabled])",  # VERIFIED
+            "[data-testid='SPC_selectPlaceOrder']:not([disabled])",  # VERIFIED
             "#placeYourOrder input",
             "#turbo-checkout-pyo-button",
             "[data-testid='placeYourOrderButton']",
-            "input[aria-labelledby='submitOrderButtonId-announce']",
         ),
-        "ASSUMED",
+        "VERIFIED",
     ),
 }
 

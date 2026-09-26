@@ -409,7 +409,7 @@ someone else's alert bot for the first signal.
 ## 🧪 Tests
 
 ```powershell
-python -m pytest -q          # 217 tests, ~90 s (headless Chromium for fixture‑driven tests)
+python -m pytest -q          # 218 tests, ~90 s (headless Chromium for fixture‑driven tests)
 ruff check src tests
 ```
 
@@ -446,11 +446,12 @@ order can be placed. Coverage highlights:
 | Seller text `Amazon.ca` via `#merchantInfoFeature_feature_div` | ✅ live 2026‑09‑25 | |
 | *Ships from* row on an Amazon‑sold pre‑order | ✅ observed **absent** | Fulfillment is now inferred from Amazon‑as‑seller in that case. |
 | Pre‑order availability text | ✅ live 2026‑09‑25 | *"This item will be released on October 29, 2026. Pre‑order now."* |
-| Checkout review page (`CHECKOUT_PAGE` selectors), turbo‑checkout iframe, confirmation markers, order‑id pattern | ⚠️ **assumed** | Fail‑closed. Never seen live. On refusal the runner saves a full‑page screenshot + all‑frame HTML to `runtime/artifacts/` and the full field dump to telemetry. |
+| Checkout review page (`/checkout/p/<id>/spc`): ASIN as **text** in `[data-testid^='Item_asin_']`, `.lineitem-container` (count), `.lineitem-title-text`, `.lineitem-price-text`, quantity in the atomic stepper `fieldset[name='checkout-quantity-stepper'] [data-a-selector='inner-value']`, seller `.lineitem-seller-section` (*Sold by …*), *Ships from …* line, `#deliver-to-address-text`, `#selected-payment-methods-list-container` (*Paying with Visa 4105*), order total `#subtotals-marketplace-table .a-text-bold [data-shimmer-target='ordertotals-amount']`, `input[name='placeYourOrder1']` top + bottom **plus four disabled blocker copies** | ✅ live 2026‑09‑25 21:19 | Operator's signed‑in review page (redacted HTML). **Six of the previously assumed fields (ASIN, quantity, total, seller, address, payment) would have read empty** and refused the order; all fixed and the fixture `checkout.html` rebuilt to mirror the live markup. No condition row (inherited from the product page). No CVV prompt for the saved Visa. Place‑order candidates now carry `:not([disabled])`. |
+| Turbo‑checkout iframe, confirmation markers, order‑id pattern | ⚠️ assumed | Iframe is irrelevant on the cart path. Confirmation ambiguity ends in `UNKNOWN` (stop + push), never a second click. |
 | Cart page: `#sc-active-cart[data-cart-total-item-count]`, `ul[data-name="Active Items"]`, rows `.sc-list-item[data-asin][data-quantity][data-isselected]`, checkout checkbox `.sc-list-item-checkbox input`, gift checkbox (avoided), atomic stepper `fieldset[data-action=a-stepper][data-steppervalue]` + decrement `button[data-action=a-stepper-decrement]` (labelled **Delete** at qty 1, *Decrease quantity by one* above), `input[data-action=save-for-later]`, `input[data-action=delete-active]`, `#nav-cart-count`, `#sc-buy-box[data-quantity]` | ✅ live 2026‑09‑25 21:04 | Operator's signed‑in cart with one item (outerHTML of `#sc-active-cart`). Fixture `cart.html` mirrors it. |
 | Cart *Proceed to checkout*: `input[name='proceedToRetailCheckout'][data-feature-id='proceed-to-checkout-action'][aria-labelledby='sc-buy-box-ptc-button-announce']` | ✅ live 2026‑09‑25 21:16 | Operator paste of the button element. |
 | Add‑to‑cart side sheet ids (`#attach-sidesheet-checkout-button` …) | ⚠️ assumed | Fast path only; if none is found the bot goes via the cart page (verified) and loses ~1–2 s. |
-| Review‑page CVV / card‑input prompt (`payment_input`) | ⚠️ assumed | Visibility‑checked only, so a wrong guess can never block a normal checkout; it can only miss a prompt (which then ends in `UNKNOWN` as before). |
+| Review‑page CVV / card‑input prompt (`payment_input`) | ⚠️ assumed (observed **absent** 2026‑09‑25 for the saved Visa) | Visibility‑checked only, so a wrong guess can never block a normal checkout; it can only miss a prompt (which then ends in `UNKNOWN` as before). |
 | Order‑history layout (`reconcile`), MFA selectors | ⚠️ assumed | |
 | Does the pre‑order page show *Buy Now* at all? | ❓ operator says **no** (2026‑09‑25) | Only *Pre‑order now* (add‑to‑cart slot). The adapter takes the cart path automatically whenever Buy Now is absent; the cart is tidied to the single target unit first. |
 
@@ -469,8 +470,9 @@ order can be placed. Coverage highlights:
   unresolved**. Nothing here conceals the extension's existence or behaviour; ask before use.
 - 🤖 Amazon may challenge automation‑flagged sessions (headless especially). Challenges pause
   the system; they are never bypassed.
-- 🧾 Checkout selectors are unverified until a live review page has been observed. The first
-  purchasable window may be a diagnostic run rather than a purchase.
+- 🧾 Review‑page selectors were verified against one live review page (2026‑09‑25, third‑party
+  item). Amazon A/B‑tests checkout layouts per session; legacy candidates remain as fallbacks
+  and any unreadable field still fails closed with a screenshot + HTML dump.
 - ⏳ A pre‑order/restock window can close in minutes. The robot decides in ~2.5 s but cannot
   beat Amazon's own queueing or a sold‑out‑in‑seconds drop.
 
