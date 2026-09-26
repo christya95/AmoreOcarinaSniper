@@ -1,0 +1,49 @@
+---
+description: Always-on traps, rehearsal/extract workflow, and what not to reopen. Read AGENTS.md Start here + Regression traps first.
+alwaysApply: true
+---
+
+# Do not regress this purchaser
+
+Read `AGENTS.md` → *Start here*, *Last session handoff*, *Regression traps*, *Runbook* before
+changing anything. Treat the handoff as already-done work. Do not re-read the whole file or
+re-ask decisions that are in the handoff / Decision log. File-scoped details live in the
+other `.cursor/rules/*.mdc` files.
+
+## Do not reopen (operator already decided)
+
+- Request replay / Postman / header or cookie capture. Drive the signed-in Playwright pages.
+- Discord API, bot token, WebSocket interception, OCR, CAPTCHA/MFA bypass.
+- Classifying `"sorry! something went wrong"` / CloudFront *could not be satisfied* as a ban.
+  That is `server_error` → transient. Only *Access Denied* / *automated access* stops the bot.
+- Retrying **after** `persist_submission_intent`. Before it, ≤ 2 transient retries are allowed.
+- Exponential watcher back-off on timeouts (cap is 2×). Cooldown is bound to the refused
+  offer's signature; polling continues during cooldown.
+- Restoring `.a-size-small:has-text('Condition')` (matched footer *Conditions of use*).
+- Treating the add-to-cart side sheet as an "added" confirmation (it is a warranty upsell).
+- Clicking the cart decrement more than once per pass (at qty 1 it is *Delete*).
+- Reading review-page ASIN from `data-asin` (there is none; it is text in
+  `span[data-testid^='Item_asin_']`).
+- Requiring a *Ships from* row when the seller is Amazon.
+- Requiring payment text to say *ending in* (live text is *Paying with Visa 4105*).
+- Enabling `checkout.block_heavy_assets` (benchmarked: no gain).
+- Printing `config.toml` whole, logging cookies/tokens/card/CVV, committing
+  `config.toml` / `secrets/` / `profiles/` / `runtime/` / `artifacts/`.
+
+## Before changing a VERIFIED selector or the checkout path
+
+1. Prefer existing evidence: `runtime/artifacts/*` and `telemetry.jsonl` (`offer_checked`,
+   `checkout_checked`). The `raw` dict already says which candidate matched.
+2. Rehearsal (dry-run, never submits): stop the LIVE runner first (AGENTS.md → Runbook), then
+   `ocarina doctor --browser --checkout-probe --probe-asin B0GJZ8WJD9`. Dumps land in
+   `runtime/artifacts/probe-<ts>/`. Tell the operator to empty the cart afterwards. Restart +
+   `ocarina arm --minutes 4320`.
+3. Operator dump of a page the bot cannot reach: the redacting DevTools snippet in
+   AGENTS.md → *Gathering evidence*. Analyse with the adapter extractor (`EXTRACT_JS` +
+   `CHECKOUT_SPEC` / `PRODUCT_SPEC`) from a script in `$env:TEMP`, not BeautifulSoup.
+4. Then: verified candidate first + `# VERIFIED <date>`; rebuild the fixture; assert
+   `snapshot.raw["fields"][name]["selector"]`; update README verification table + AGENTS.md
+   task board; `pytest -q` + `ruff check src tests`.
+
+PowerShell has no heredoc. Temp files go in `$env:TEMP`. Prefer small edits; do not rewrite
+modules. Never invent a restart of the LIVE runner — use the Runbook commands exactly.

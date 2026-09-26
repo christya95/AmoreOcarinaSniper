@@ -23,8 +23,44 @@ living documents: update them in the same commit as the work they describe.
 - **Test suite**: 238 tests, ~95 s; `-m "not browser"` runs in ~8 s. Both must be green plus
   `ruff check src tests` before a commit. Fixtures in `tests/fixtures/amazon/` mirror the live
   markup; if a live page differs from a fixture, the fixture is what needs to change.
-- Detailed history is in *Task board* and *Decision log* below; the file-scoped rules in
-  `.cursor/rules/` carry the per-module traps.
+- Detailed history is in *Last session handoff*, *Task board* and *Decision log* below; the
+  file-scoped rules in `.cursor/rules/` carry the per-module traps. A new chat should read
+  *Start here* + *Last session handoff* + *Regression traps* + *Runbook* and stop — do not
+  re-read the whole file or re-derive decisions already logged.
+
+## Last session handoff (2026-09-25 evening — keep this the newest block)
+
+Replace this whole section at the end of a session that changed behaviour or closed a
+decision. A new model should treat it as already-done work, not a todo list.
+
+- **LIVE runner** is up (`ocarina LIVE runner` window), `watch=every 15s`, **ARMED until
+  2026-09-28 22:49** (`max_arm_minutes = 4320`). Restarts always come up DISARMED — use the
+  Runbook, then `ocarina arm --minutes 4320`.
+- **Host `config.toml` facts** (git-ignored; grep a key, never print the file): `allow_preorder
+  = true`, `max_item_price = "709.99"`, `max_total = "810.00"`, `strategy` in file may still
+  say `buy_now` but the listing never shows Buy Now and the probe **forces cart**;
+  `approved_address_contains` / `approved_payment_contains` match live review-page text
+  (`1447, Sycamore…` / `Paying with Visa 4105`); `interval_s = 15`; ntfy topic set (phone
+  subscribe still unconfirmed).
+- **Shipped this evening, do not re-implement:** cart path primary + tidy; review-page
+  selectors live-verified (ASIN as text, `:not([disabled])` place-order); rehearsal in the
+  bot profile (3.0 s to review page, GameSir `B0GJZ8WJD9`, cart emptied 22:24); rush
+  hardening (≤ 2 pre-intent retries, stay ARMED, watcher tab reuse, 15 s poll); edge-case
+  pass 2 (`SERVER_ERROR` transient, capture-before-abandon, visible place-order wait,
+  signature-bound cooldown, arm-expiry + retry pushes). 238 tests. Commits include `a3e18ed`,
+  `59c6772`, `be5dc91`.
+- **Closed, do not reopen:** request replay / Postman / header capture (place-order form has
+  only `anti-csrftoken-a2z` + `hasWorkingJavascript`; gain < 1 s; flags the account).
+  `block_heavy_assets` benchmarked no-op. Moderator-acceptance of Discord monitoring is still
+  an operator/legal item, not a code item.
+- **Still assumed** (only observable on a real order or a challenge): thank-you markers and
+  order-id location on that page; side-sheet *Proceed* (not offered on this account); MFA
+  selectors; `payment_input` (observed absent).
+- **Operator still to do:** ntfy on iPhone + `ocarina notify-test`; confirm Amazon default
+  address/card in the account UI; pause Windows Update / set active hours; Scheduled Task at
+  logon; after first `watch_challenge` at 15 s, consider `interval_s = 30`.
+- **How to gather evidence** is *Gathering evidence* below. Do not ask the operator to recapture
+  a page the bot already dumped.
 
 ## Regression traps (deliberate decisions that look like bugs — do not "fix")
 
@@ -162,7 +198,8 @@ Layout:
   `extract.py`, `adapter.py`.
 - `tests/` — pytest suite; fixtures in `tests/fixtures/{discord,amazon}/`.
 - `config.example.toml` — the only config that is committed.
-- `.cursor/rules/*.mdc` — file-scoped agent rules (adapter, state machine, extension, tests).
+- `.cursor/rules/*.mdc` — agent rules. `do-not-regress.mdc` is always-on (traps + rehearsal);
+  the others apply when the matching files are open (adapter, state machine, extension, tests).
 
 ## Hard rules (do not relax without an explicit user decision)
 
@@ -429,8 +466,8 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
   price, seller); a different offer triggers immediately. Polling continues during cooldown.
 - Pushes: informational *Stock seen — bot retrying* on the first retry when an offer was present;
   *arm window ends in 30 minutes* and *DISARMED: armed session expired* from `_expiry_watch`.
-- 238 tests. **Operator decision pending:** `policy.max_arm_minutes` is 720 (12 h); the drop can
-  come at any hour before Oct 29 — consider 4320 (3 days) and arming for the full window.
+- 238 tests. Operator then raised `policy.max_arm_minutes` to 4320 and armed until
+  2026-09-28 22:49.
 
 ### Next up
 - [x] Operator raised `policy.max_arm_minutes` to 4320 (3 days) 2026-09-25 22:49; armed until
@@ -455,12 +492,17 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
   (2026-09-24 22:59). Runner left in dry-run, armed until 2026-09-25 10:59.
 - [ ] Wait for the next real Lbabinz alert in dry-run; confirm popup *Last match* updates and
   `ocarina status` shows an accepted event (expected to stop at *not in stock* unless restocked).
-- [ ] Decide `checkout.strategy` default after the first `--checkout-probe`.
+- [x] Checkout strategy: listing never shows Buy Now; cart path is primary (rehearsed).
+  Host `strategy` key is ignored on this listing; probe forces `"cart"`.
 
 ### In progress
 - (none)
 
 ### Done
+- [x] Agent docs: *Start here*, *Regression traps*, *Runbook*, *Gathering evidence* (rehearsal +
+  extract workflow) in this file; always-on `.cursor/rules/do-not-regress.mdc` plus file-scoped
+  adapter / state-machine / tests / extension rules so a cheaper model does not reopen decided
+  work.
 - [x] `4315184` Popup pulls tab status on open (fixes *no status yet* after MV3 worker
   suspension). 168 tests.
 - [x] `969608b` Evidence capture on rejection; runner always logs to `runtime/logs/runner.log`.
@@ -474,6 +516,16 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
 
 ## Decision log
 
+- 2026-09-25 22:49 — **Arm window 3 days** (`max_arm_minutes = 4320`). Expiry pushes at
+  T-30 min and at expiry; never auto-extended. Re-arm: `ocarina arm --minutes 4320`.
+- 2026-09-25 22:2x — **No request replay.** Evaluated against the redacted review-page form
+  (two hidden inputs). Sequential cart → SPC → place-order still needed; tokens are
+  per-purchase; a fingerprint mismatch flags the account. Do not install Postman or persist
+  cookies/headers. Revert would be a new adapter path — do not add one.
+- 2026-09-25 22:00 — **Cart path is primary.** Listing is pre-order only; Buy Now is never
+  shown. Host `checkout.strategy` may still say `buy_now`; the adapter takes add-to-cart
+  whenever Buy Now is absent, and `--checkout-probe` forces cart. The 2026-09-24 "Buy Now
+  default" note below is historical.
 - 2026-09-25 22:30 — **Amazon error pages are transient, not challenges.** "Sorry! Something
   went wrong" and CloudFront "request could not be satisfied" are Amazon's overload responses,
   the most likely thing to be served during a pre-order rush; parking the bot on them would
