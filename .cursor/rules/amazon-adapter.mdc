@@ -1,0 +1,54 @@
+---
+description: Amazon adapter, selectors and extractor — live-verified facts and traps
+globs: src/amore_ocarina_sniper/amazon/**
+alwaysApply: false
+---
+
+# Amazon adapter (`adapter.py`, `selectors.py`, `extract.py`)
+
+Every selector marked `VERIFIED` was checked against the operator's real signed-in amazon.ca
+pages on 2026-09-25 (see README → *What is verified and what is not*). Do not change a VERIFIED
+candidate from memory of "how Amazon looks"; change it only from a new dump, then rebuild the
+fixture and update README + AGENTS.md in the same commit.
+
+## Facts about the live pages (this account, this listing)
+
+- Product page: pre-order only → `#add-to-cart-button` reads *Pre-order now*; **no Buy Now**.
+  Amazon-sold: `Sold by Amazon.ca`, **no *Ships from* row** (fulfiller inferred from seller).
+- Add-to-cart button (`attach-dss-atc`) adds via AJAX `POST /cart/add-to-cart` and opens
+  `#attach-desktop-sideSheet[aria-modal=true]` containing a **warranty upsell**
+  (`#attach-warranty-pane`), no "added" text, no Proceed button. Nav badge `#nav-cart-count`
+  loads progressively → baseline may be unreadable. Hence `_add_to_cart_confirmed` watches
+  network + visible surface + badge increase; never reduce it to one signal.
+- Cart page: rows `[data-asin][data-quantity][data-isselected]`; per-row checkout checkbox
+  `.sc-list-item-checkbox` (a **gift** checkbox also exists — never click it); quantity is an
+  atomic stepper `fieldset[data-action=a-stepper]`; at qty 1 the decrement button **is Delete**
+  → one decrement per pass, re-read, ≤ 6 passes.
+- Review page (`/checkout/p/<id>/spc`): ASIN is **text** in `span[data-testid^='Item_asin_']`
+  (no `data-asin` attribute exists); quantity `fieldset[name=checkout-quantity-stepper]`
+  `[data-a-selector=inner-value]`; total `[data-shimmer-target=ordertotals-amount]` in the bold
+  `<li>`; address `#deliver-to-address-text` ("1447, Sycamore …" — comma present); payment
+  `#selected-payment-methods-list-container` ("Paying with Visa 4105"); **six**
+  `input[name=placeYourOrder1]`, four `disabled` → candidates must use `:not([disabled])` and
+  the wait must be `state="visible"`. No condition row, no CVV prompt.
+- Place-order form: `POST …/spc/place-order`, hidden `anti-csrftoken-a2z`, `hasWorkingJavascript`.
+  Request replay was evaluated and rejected — drive the page, never the endpoint.
+- Order history `/gp/css/order-history` redirects to *Your Orders*; ids match `\d{3}-\d{7}-\d{7}`.
+
+## Traps already hit
+
+- `.a-size-small:has-text('Condition')` matched the footer *Conditions of use* → refused a valid
+  order. Text-search selectors need `_looks_like_condition`-style sanity checks.
+- Amazon's "Sorry! Something went wrong" page is **overload** (`server_error`, transient), not
+  a block. Only *Access Denied* / *automated access* text is `access_denied`.
+- `abandon()` navigates; capture artifacts **before** calling it.
+- Never log purchase ids, tokens or the operator's address/card: mask digits (`re.sub(r"\d{3,}", "<n>")`),
+  use `_REDACTED_HTML_JS` for any dump, keep `probe_dir` rehearsal-only.
+
+## Workflow for any change here
+
+1. `python -m pytest -q tests/test_amazon_adapter.py` (browser tests, headless, ~60 s).
+2. Rehearse: stop the runner, `ocarina doctor --browser --checkout-probe --probe-asin B0GJZ8WJD9`,
+   read `runtime/artifacts/probe-<ts>/*.html`, confirm every field's matched selector is the
+   VERIFIED one, restart + re-arm (AGENTS.md → Runbook).
+3. Update the README verification table and the AGENTS.md task board.

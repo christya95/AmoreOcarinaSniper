@@ -3,6 +3,148 @@
 Working notes for humans and coding agents. The **Milestones** and **Task board** sections are
 living documents: update them in the same commit as the work they describe.
 
+## Start here (state of play — keep this block current)
+
+- **Production is running.** A LIVE runner (`ocarina run --live`) is normally up in a separate
+  pwsh window titled *ocarina LIVE runner*, ARMED, with the product watcher polling every 15 s.
+  It holds the Playwright profile lock: anything that opens `profiles/amazon` (`doctor --browser`,
+  `--checkout-probe`, `setup`) requires stopping it first and re-arming after. Use the runbook
+  below; do not improvise the restart.
+- **Target listing**: Amazon.ca `B0HJ6F8L6V`, pre-order only (no Buy Now ever); the cart path is
+  the primary checkout path. Price 709.99 CAD, seller `Amazon.ca`. Policy allows pre-orders.
+- **What is live-verified vs assumed** is the table in `README.md` → *What is verified and what
+  is not*. Everything on product page, add-to-cart side sheet, cart page, review page and order
+  history is VERIFIED against the operator's real signed-in pages. Still ASSUMED: thank-you page
+  markers and order-id location (only observable on a real order), side-sheet *Proceed* button,
+  MFA selectors. Do not "fix" a VERIFIED selector from memory of how Amazon usually looks.
+- **Every step up to the click has been rehearsed end-to-end in the bot's own profile**
+  (`ocarina doctor --browser --checkout-probe --probe-asin <stand-in>`, dry-run): 3.0 s from
+  add-to-cart to a fully parsed review page. Re-run this after any adapter/selector change.
+- **Test suite**: 238 tests, ~95 s; `-m "not browser"` runs in ~8 s. Both must be green plus
+  `ruff check src tests` before a commit. Fixtures in `tests/fixtures/amazon/` mirror the live
+  markup; if a live page differs from a fixture, the fixture is what needs to change.
+- Detailed history is in *Task board* and *Decision log* below; the file-scoped rules in
+  `.cursor/rules/` carry the per-module traps.
+
+## Regression traps (deliberate decisions that look like bugs — do not "fix")
+
+| Looks wrong | Why it is right | Where |
+|---|---|---|
+| `"sorry! something went wrong"` is *not* an access-denied marker | Amazon's overload page under a rush; parking the bot on it loses the drop. It is `server_error` → transient. Only *Access Denied* / *automated access* stops the bot. | `selectors.CHALLENGES`, `ChallengeKind.transient` |
+| Pre-intent failures are retried (≤ 2) | Hard rule 5 forbids retries **after** the intent only. Retries re-run full policy each pass. | `coordinator._run_attempt` |
+| Watcher keeps polling during its cooldown | Cooldown is bound to the *refused offer's signature*; a changed offer must trigger at once. | `watch.tick` |
+| Watcher back-off on timeouts is capped at 2× | Exponential back-off is for CAPTCHA/login only; timeouts happen exactly when polling matters. | `watch._delay` |
+| `verify_offer(reuse_within_s=10)` skips a navigation | The watcher promoted its freshly loaded tab / `abandon()` just reloaded the page; older pages reload anyway. | `adapter.verify_offer`, `promote_watch_page` |
+| Evidence capture runs *before* `abandon()` | `abandon()` navigates away; a screenshot after it shows the product page, not the failure. | `coordinator._run_attempt` |
+| Place-order wait uses `state="visible"` and raises `unknown_page` | The live page has 4 **disabled** blocker copies of the button; a snapshot without an enabled one can only be refused, which would start the watcher cooldown mid-drop. | `adapter._wait_for_checkout_surface` |
+| No `.a-size-small:has-text('Condition')` selector | It matched the footer *Conditions of use* → `condition != new` → would have refused the real order. `_looks_like_condition` guards the field. | `selectors.CHECKOUT_PAGE`, `extract.parse_checkout` |
+| Add-to-cart confirmation watches three signals | The side sheet on this account is a **warranty upsell** with no "added" text; the nav badge loads progressively; the POST to `/cart/add-to-cart` is the reliable one. | `adapter._add_to_cart_confirmed` |
+| Cart stepper decrement is one click per pass | At qty 1 the same button becomes **Delete**. | `adapter._tidy_cart` |
+| ASIN on the review page is read as *text* | `span[data-testid^='Item_asin_']`; there is no `data-asin` attribute anywhere on the live page. | `selectors.CHECKOUT_PAGE["item_asin"]` |
+| `fulfiller_ok` accepts an empty fulfiller for Amazon-as-seller | The Amazon-sold pre-order renders no *Ships from* row at all. | `policy.fulfiller_ok` |
+| `payment_matches` accepts a bare last-4 | Live text is *Paying with Visa 4105*, not *ending in 4105*. | `policy.payment_matches` |
+| `checkout.block_heavy_assets = false` | Benchmarked: no gain (verify stops at `domcontentloaded`). | README M5 |
+| `max_item_price` ships as `"0.00"` in the example | `arm` must refuse until the operator sets a limit deliberately. | `config.example.toml` |
+| Sender user id is empty for the alert author | The alert app uses a default avatar → no user id in the DOM; a configured id fails closed. | extension options |
+
+## Runbook (exact commands, PowerShell, repo root)
+
+```powershell
+# Stop the LIVE runner (kills the pwsh/ocarina/python processes of `ocarina run`)
+Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'ocarina' -and $_.CommandLine -match '\brun\b' -and $_.Name -in @('pwsh.exe','ocarina.exe','python.exe') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Start-Sleep 3; Remove-Item runtime\ocarina.lock -ErrorAction SilentlyContinue
+
+# Start it again LIVE in its own window, then re-arm (restarts always come up DISARMED)
+Start-Process pwsh -ArgumentList '-NoExit','-Command','$host.UI.RawUI.WindowTitle = "ocarina LIVE runner"; Set-Location D:\Users\josua\workspace\AmoreOcarinaSniper; ocarina run --live'
+Start-Sleep 12; ocarina arm --minutes 4320; ocarina status
+
+# Health: last lines of the runner log / telemetry, and challenge count (should stay 0)
+Get-Content runtime\logs\runner.log -Tail 5
+Select-String -Path runtime\logs\telemetry.jsonl -Pattern 'watch_challenge|transient|watch_error' | Measure-Object
+
+# Rehearsal in the bot's profile (runner must be stopped; ~3 min; dry-run; writes redacted dumps
+# to runtime/artifacts/probe-<ts>/). Stand-in ASIN must have add-to-cart and be cheap.
+ocarina doctor --browser --checkout-probe --probe-asin B0GJZ8WJD9
+
+# Emergency stop that survives everything: creates the kill-switch file the coordinator checks
+ocarina kill
+```
+
+PowerShell has no heredoc; use the file tools for edits, never `cat <<EOF`. Temp scripts go to
+`$env:TEMP`, never into the repo. `config.toml` is git-ignored and holds the operator's real
+address/payment fragments — never print it whole in a chat; grep the key you need.
+
+## Gathering evidence from live pages (how every selector got verified)
+
+Verification order of preference — cheapest and safest first:
+
+1. **Artifacts the bot already wrote.** Any refusal with an offer present, any transient failure
+   on its last pass and any challenge leaves `runtime/artifacts/<ts>-<label>.png` + `.html`
+   (all frames) and a `telemetry.jsonl` event carrying the full `offer` / `snapshot` dict incl.
+   `raw` (which candidate matched each field, what was present, counts). Read these before
+   asking the operator for anything.
+   ```powershell
+   Select-String -Path runtime\logs\telemetry.jsonl -Pattern '"checkout_checked"|"offer_checked"' | Select-Object -Last 3
+   Get-ChildItem runtime\artifacts | Sort-Object LastWriteTime | Select-Object -Last 10
+   ```
+2. **Rehearsal in the bot's own profile** (dry-run, never submits; runner stopped; ~3 min):
+   `ocarina doctor --browser --checkout-probe --probe-asin <ASIN>` forces the cart strategy,
+   substitutes the stand-in ASIN/URL into a copy of the config, runs the real
+   add-to-cart → cart → review path, prints *offer read in Xs*, *review page reached in Xs* and
+   the `matched selectors` dict, and writes redacted dumps `after-add-to-cart.html`,
+   `cart-page.html`, `review-page.html` to `runtime/artifacts/probe-<ts>/`. Policy is reported,
+   not bypassed (it refuses on ASIN/title/seller for the stand-in — expected). The stand-in
+   stays in the operator's cart afterwards: tell them to remove it. Pick something cheap with
+   *Add to Cart* (GameSir controller `B0GJZ8WJD9` was used); a stand-in with *Buy Now* is fine
+   because the probe forces `strategy = "cart"`.
+3. **Operator capture of a page the bot cannot reach** (a live drop review page, order history,
+   a challenge). Ask them to paste this in the DevTools console on the page and save the
+   result to `Downloads/<name>.html`; it is the same redaction the adapter uses (scripts, styles,
+   images, iframes removed; hidden-input values → `[HIDDEN]`; 12–19 digit runs → `[NUM]`):
+   ```js
+   (() => { const c = document.documentElement.cloneNode(true);
+     c.querySelectorAll('script,style,link,svg,img,noscript,iframe').forEach(e => e.remove());
+     c.querySelectorAll('input[type=hidden]').forEach(e => e.setAttribute('value', '[HIDDEN]'));
+     const html = c.outerHTML.replace(/\b\d{12,19}\b/g, '[NUM]');
+     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([html], {type: 'text/html'}));
+     a.download = 'page.html'; a.click(); })()
+   ```
+   Copy the file into `runtime/artifacts/` (git-ignored) before analysing. Pasting a single
+   element's `outerHTML` (DevTools → *Copy outerHTML*) is enough for one control.
+4. **Never** ask for or store: cookies, request headers, HAR files, Postman/Fiddler captures,
+   `anti-csrftoken-a2z` values, card/CVV fields, purchase ids in logs. Request replay was
+   evaluated and rejected (Decision log, 2026-09-25 22:2x) — do not reopen it.
+
+Analysing a dump offline — use the adapter's own extractor against the file, so `:not([disabled])`,
+`^=`, `:has-text()` behave exactly as in production (script lives in `$env:TEMP`, not the repo;
+no BeautifulSoup — plain `html.parser` is fine for ad-hoc attribute walks):
+
+```python
+# %TEMP%\probe.py  <dump.html>  -> which candidate matched each review-page field
+import asyncio, json, sys
+from pathlib import Path
+from playwright.async_api import async_playwright
+from amore_ocarina_sniper.amazon.extract import CHECKOUT_SPEC, EXTRACT_JS  # or PRODUCT_SPEC / CHALLENGE_SPEC
+
+async def main(path):
+    async with async_playwright() as pw:
+        b = await pw.chromium.launch(); p = await b.new_page()
+        await p.set_content(Path(path).read_text(encoding="utf-8"))
+        raw = await p.evaluate(EXTRACT_JS, CHECKOUT_SPEC)
+        for name, f in raw["fields"].items():
+            print(f"{name:18} {f['selector'] or '-':60} {str(f['value'])[:60]!r}")
+        print("present:", json.dumps(raw["present"]), "counts:", json.dumps(raw["counts"]))
+        await b.close()
+asyncio.run(main(sys.argv[1]))
+```
+
+After verifying: (a) reorder the Field's candidates so the verified one is first and mark it
+`# VERIFIED <date>`; (b) rebuild the matching fixture in `tests/fixtures/amazon/` to mirror the
+live markup (keep the `window.__checkoutFixture` / `window.__cartFixture` variant switches the
+tests set via `Routing`); (c) make the test assert the *verified* candidate matched
+(`snapshot.raw["fields"][name]["selector"]`); (d) update the README verification table;
+(e) rerun the rehearsal if the adapter path changed.
+
 ## What this project is
 
 A Chromium MV3 extension watches one open Discord channel for one configured stock alert and
@@ -20,6 +162,7 @@ Layout:
   `extract.py`, `adapter.py`.
 - `tests/` — pytest suite; fixtures in `tests/fixtures/{discord,amazon}/`.
 - `config.example.toml` — the only config that is committed.
+- `.cursor/rules/*.mdc` — file-scoped agent rules (adapter, state machine, extension, tests).
 
 ## Hard rules (do not relax without an explicit user decision)
 
@@ -50,7 +193,7 @@ Layout:
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"          # once
 python -m playwright install chromium      # once
-python -m pytest -q                        # full suite (~75 s, headless Chromium for fixture tests)
+python -m pytest -q                        # full suite (~95 s, headless Chromium for fixture tests)
 python -m pytest -q -m "not browser"       # fast subset
 ruff check src tests
 ocarina doctor                             # readiness + selector verification table

@@ -1,0 +1,48 @@
+---
+description: Test suite conventions — fixtures mirror live markup, variant switches, browser marker, FakeAdapter
+globs: tests/**
+alwaysApply: false
+---
+
+# Tests (`tests/`)
+
+No test may reach the network or place an order. Browser tests run headless Chromium against
+`tests/fixtures/amazon/*.html`, served by `Routing.handle` in `test_amazon_adapter.py`, which
+intercepts `https://www.amazon.ca/**` and maps paths → fixture files. Everything else uses
+`FakeAdapter` (`test_coordinator.py`) — extend it rather than mocking Playwright.
+
+```powershell
+python -m pytest -q -m "not browser"   # ~8 s, run after every edit
+python -m pytest -q                    # full, ~95 s, before every commit
+ruff check src tests                   # tests ignore E501 only
+```
+
+## Fixtures are copies of the live DOM, not sketches
+
+`checkout.html`, `cart.html`, `product_preorder_cart_only.html` were rebuilt from the operator's
+redacted captures (2026-09-25). When a live page and a fixture disagree, fix the fixture (and the
+selector), never make the selector looser to satisfy an old fixture. Keep the structural quirks
+that caught real bugs: the four **disabled** `placeYourOrder1` blockers, the footer
+*Conditions of use* text, the warranty side sheet without a Proceed button, the stepper whose
+decrement is *Delete* at qty 1, the `1447, Sycamore …` comma, `Paying with Visa 4242`.
+
+Variants are switched inside the fixture by `window.__checkoutFixture` / `window.__cartFixture`
+(set through `Routing(checkout=…, cart=…)` → `add_init_script`). Add a new case as a variant
+branch in the fixture's script block plus a `parametrize` row; do not add a whole new file for a
+one-element difference. The header comment of each fixture lists its variants — keep it current.
+
+## What each new behaviour needs
+
+- State machine change → `test_coordinator.py` (and `test_store.py` if a transition changed).
+  Assert the `adapter.calls` sequence, not just the final state; order matters (e.g. capture
+  before `abandon`).
+- Watcher change → `test_watch.py`: use `watcher.tick()` directly; never sleep for the interval.
+- Selector change → `test_amazon_adapter.py` must assert the **verified** candidate matched
+  (`snapshot.raw["fields"][name]["selector"]`), not merely that a value was read.
+- Policy change → `test_policy.py` with the fail-closed case (missing field → refused).
+- Notification change → `test_notify.py` uses the local aiohttp `sink`; delivery order of two
+  concurrent pushes is not deterministic — assert on the set of titles.
+- Extension/matcher change → both `test_matching.py` and `test_extension_matcher.py`.
+
+Temporary scripts belong in `$env:TEMP`, never under `tests/`. Update the test count in
+`README.md` (*Development* section) and the AGENTS.md *Start here* block when it changes.

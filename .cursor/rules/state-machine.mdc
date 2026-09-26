@@ -1,0 +1,50 @@
+---
+description: Coordinator, watcher, store and policy — retry semantics, transient vs challenge, cooldown rules
+globs: src/amore_ocarina_sniper/{coordinator,watch,store,models,policy,app}.py
+alwaysApply: false
+---
+
+# Purchase state machine (`coordinator.py`, `watch.py`, `store.py`, `policy.py`)
+
+States: `DISARMED → ARMED → VERIFYING → CHECKOUT_READY → SUBMITTING → PURCHASED | UNKNOWN`,
+plus sticky `NEEDS_ATTENTION`. Transitions are CAS helpers in `store.py`; add one there, never
+write the control row directly. `PURCHASED`/`UNKNOWN` set `purchase_disabled` until `reset`.
+
+## The one line that matters
+
+`store.persist_submission_intent(eid)` is the point of no return. **Before** it: anything may be
+retried (bounded), refused, or abandoned, and the bot returns to `ARMED`. **After** it: exactly
+one click, then `PURCHASED` or `UNKNOWN`; no retry, no second click, no "let me check the cart
+and try again". Tests: `test_crash_after_submit_is_unknown_and_never_retried`.
+
+## Transient vs challenge (do not blur this)
+
+| Kind | Meaning | Handling |
+|---|---|---|
+| `UNKNOWN_PAGE`, `SERVER_ERROR`, Playwright `TimeoutError` | slow/overloaded Amazon, page in flux | retry ≤ `MAX_TRANSIENT_RETRIES` within the trigger; else `ARMED` + `AttemptOutcome.transient=True`; push after streak of `TRANSIENT_STREAK_NOTIFY` |
+| `CAPTCHA`, `LOGIN_REQUIRED`, `MFA`, `ACCESS_DENIED`, `PAYMENT_CHALLENGE` | a human is wanted | `NEEDS_ATTENTION`, never retried, never bypassed |
+| Policy refusal (`PolicyDecision.ok=False`) | page readable, offer not acceptable | `ARMED` (benign); watcher cooldown for **that offer signature** only |
+
+`ChallengeKind.transient` is the single source of truth; `is_transient()` in the coordinator and
+`tick()` in the watcher both use it.
+
+## Watcher invariants (hard rule 12)
+
+- ≥ 10 s interval (config-enforced), jittered, only while `ARMED`, never while `is_busy()`.
+- Back-off: exponential on challenges (`_challenges`), ≤ 2× on timeouts (`_failures`).
+- Cooldown after a refusal applies only while `_signature(offer) == _refused_signature`;
+  polling continues during cooldown; a transient failure starts no cooldown.
+- Before triggering it calls `adapter.promote_watch_page()` so pass 0 may reuse the rendered tab
+  (`WATCH_PAGE_REUSE_S`); retries also reuse the page `abandon()` just reloaded.
+
+## Evidence and notifications are off the critical path
+
+Capture artifacts only when the attempt is already over (last retry pass, refusal, challenge)
+and **before** `_abandon()`. `Notifier.fire()` is fire-and-forget; never `await send()` inside an
+attempt. Messages carry state and policy reasons only — no page text, no address, no card.
+
+## Tests to keep green
+
+`tests/test_coordinator.py`, `tests/test_watch.py`, `tests/test_store.py`, `tests/test_policy.py`,
+`tests/test_notify.py` (all non-browser, ~8 s). Extend `FakeAdapter` rather than mocking
+Playwright.

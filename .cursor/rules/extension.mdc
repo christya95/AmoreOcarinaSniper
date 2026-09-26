@@ -1,0 +1,51 @@
+---
+description: Discord MV3 extension — DOM-only observation, verified selectors, matcher parity, MV3 lifecycle traps
+globs: extension/**
+alwaysApply: false
+---
+
+# Discord watcher extension (`extension/`)
+
+Plain MV3, no bundler, no npm. Content script observes the **open** Discord channel's DOM with a
+`MutationObserver` and POSTs one minimal trigger to `http://127.0.0.1:48620` via the service
+worker. Nothing else: no Discord API, no bot token, no WebSocket interception, no OCR, no link
+opening (hard rule 6/7). Never widen host permissions beyond `discord.com` + the bridge origin.
+
+## Live-verified Discord DOM (2026-09-24, Comet/Chromium) — `content/selectors.js`
+
+`ol[data-list-id="chat-messages"]`, `li#chat-messages-<channel>-<message>`, `#message-content-*`,
+`#message-accessories-*` (embeds: title / description), `time[datetime]`, username header with
+`data-text` and an `APP` bot tag (strip the badge before name matching). The alert author uses a
+**default avatar → no user id in the DOM**: the *Sender user id* option must stay empty for it
+(a configured id fails closed, by design). Selector status lives in that file's header comment;
+change it only from a live DOM inspection and record the date.
+
+## Matcher parity
+
+`shared/matcher.js` and `src/amore_ocarina_sniper/matching.py` must produce identical results.
+Shared vectors: `tests/test_matching.py` (Python) and `tests/test_extension_matcher.py` (runs
+the JS in Node/Playwright). Any change to normalisation or matching edits **both** files and
+both tests in the same commit.
+
+## MV3 lifecycle traps already hit
+
+- The service worker is suspended after ~30 s idle; state lives in `chrome.storage`, not in
+  module globals. Alarms (`HEALTH_ALARM`, `SWEEP_ALARM`, 1 min) are the only timers.
+- Popup showed *no status yet* after suspension → popup now sends `request-status` to the tab on
+  open (`background.js`). Keep that pull; do not rely on pushed state alone.
+- After *Load unpacked* / reload the content script is **not** injected into an already open
+  Discord tab — the tab must be reloaded. Say so whenever you ask the operator to reload.
+- Comet Memory Saver must keep `discord.com` active (host setting, done); a discarded tab has no
+  observer.
+
+## Trigger contract with Python (`bridge.py`)
+
+`POST /trigger` JSON: `event_id` (`<channel>-<message>`), `channel_id`, `guild_id`,
+`message_id`, `matched_target`, `message_ts_ms`, `sent_at_ms`, `detected_at_offset_ms`; shared
+secret in the `Authorization` header (paired via `ocarina pair`). Python validates every field
+(regexes, ranges, max age), dedupes by `event_id`, checks `matched_target` and the `Origin`
+header (`allowed_extension_origin` in `config.toml`). Do not add fields that carry message text or
+links; the trigger cannot arm, disarm, reset or alter policy (hard rule 3).
+
+Tests: `tests/test_extension_content.py`, `tests/test_extension_background.py`,
+`tests/test_bridge.py`; fixture `tests/fixtures/discord/channel.html` mirrors the live list.
