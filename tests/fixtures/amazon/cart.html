@@ -1,87 +1,135 @@
 <!doctype html>
 <!--
-  Amazon.ca cart fixture. Container ids (#sc-active-cart, #sc-saved-cart, #sc-buy-box
-  data-quantity), the quantity-stepper aria-labels ("Quantity is N", "Decrease quantity by
-  one"), the per-item checkbox aria-label ("Select … for checkout") and the "Proceed to
-  checkout (N items)" wording were read from the live cart page on 2026-09-25. Item-row
-  structure (.sc-list-item[data-asin][data-quantity], Save for later / Delete inputs) is the
-  long-standing markup and is ASSUMED. Variants via window.__cartFixture (see
-  product_preorder_cart_only.html). Proceed navigates to the checkout fixture with a variant
-  derived from what is still active in the cart, so a badly tidied cart is caught downstream.
+  Amazon.ca cart fixture modelled on the operator's live signed-in cart (2026-09-25 21:04):
+    #sc-active-cart[data-cart-total-item-count]  >  ul[data-name="Active Items"]  >
+    div.sc-delivery-group  >  div.a-row.sc-list-item[data-asin][data-quantity][data-isselected]
+  Each row carries: hidden "removed" message divs that share data-action="delete" /
+  "save-for-later" (must never be clicked), a checkout checkbox inside .sc-list-item-checkbox
+  ("Select … for checkout"), a *gift* checkbox (must never be touched), an atomic quantity
+  stepper (fieldset[data-action=a-stepper][data-steppervalue], legend "Quantity is N") whose
+  decrement <button data-action="a-stepper-decrement"> is labelled "Delete …" at quantity 1
+  and "Decrease quantity by one, Quantity is N, …" above, plus
+  input[data-action="delete-active"] and input[data-action="save-for-later"].
+  Variants via window.__cartFixture (see product_preorder_cart_only.html). Proceed navigates
+  to the checkout fixture with a variant derived from what is still selected, so a badly
+  tidied cart is caught downstream.
 -->
 <html><head><meta charset="utf-8"><title>Amazon.ca Shopping Cart</title></head>
 <body>
 <a id="nav-cart"><span id="nav-cart-count">0</span></a>
-<form id="activeCartViewForm">
-  <div id="sc-active-cart"><div id="sc-active-items"></div></div>
-  <div id="sc-saved-cart"><div id="sc-saved-cart-items"></div></div>
-  <div id="sc-buy-box" data-quantity="0">
-    <span id="sc-subtotal-label-buybox">Subtotal (0 items):</span>
-    <span id="sc-buy-box-ptc-button" class="a-button"><input name="proceedToRetailCheckout" type="submit" class="a-button-input" value="Proceed to checkout"></span>
-  </div>
-</form>
+<div id="sc-active-cart" data-cart-total-item-count="0" data-name="Active Cart" class="a-cardui sc-list sc-active-cart">
+  <h2 id="sc-active-items-header">Shopping Cart</h2>
+  <span id="sc-selection-links-container"><a id="deselect-all" href="#">Deselect all items</a></span>
+  <form id="activeCartViewForm" method="post" action="/cart/ref=ord_cart_shr">
+    <ul data-name="Active Items" class="a-unordered-list sc-list-body">
+      <div class="sc-delivery-group" id="sc-delivery-group-0"><div id="sc-active-items"></div></div>
+    </ul>
+  </form>
+</div>
+<div id="sc-saved-cart"><div id="sc-saved-cart-items"></div></div>
+<div id="sc-buy-box" data-quantity="0">
+  <span id="sc-subtotal-label-buybox">Subtotal (0 items):</span>
+  <span id="sc-buy-box-ptc-button" class="a-button"><span class="a-button-inner"><input name="proceedToRetailCheckout" type="submit" class="a-button-input" value="Proceed to checkout" form="activeCartViewForm"></span></span>
+</div>
 <script>
   (function () {
     const variant = window.__cartFixture || 'clean';
-    const TARGET = 'B0HJ6F8L6V', EXTRA = 'B0EXTRA0001';
+    const TARGET = 'B0HJ6F8L6V', EXTRA = 'B0GJZ8WJD9';
     const withCheckboxes = variant === 'checkboxes';
     const items = [];
     if (variant === 'clean' || variant === 'clean_no_sidesheet') items.push({ asin: TARGET, qty: 1, title: 'Nintendo Switch 2 Zelda 40th' });
     if (variant === 'extra_item' || variant === 'checkboxes') {
-      items.push({ asin: EXTRA, qty: 1, title: 'USB-C Cable 2m' });
+      items.push({ asin: EXTRA, qty: 1, title: 'GameSir G7 Pro Wired Xbox Controller' });
       items.push({ asin: TARGET, qty: 1, title: 'Nintendo Switch 2 Zelda 40th' });
     }
     if (variant === 'qty_two') items.push({ asin: TARGET, qty: 2, title: 'Nintendo Switch 2 Zelda 40th' });
-    if (variant === 'missing_target') items.push({ asin: EXTRA, qty: 1, title: 'USB-C Cable 2m' });
+    if (variant === 'qty_three') items.push({ asin: TARGET, qty: 3, title: 'Nintendo Switch 2 Zelda 40th' });
+    if (variant === 'missing_target') items.push({ asin: EXTRA, qty: 1, title: 'GameSir G7 Pro Wired Xbox Controller' });
     if (variant === 'unreadable_rows') items.push({ asin: null, qty: 1, title: 'Nintendo Switch 2 Zelda 40th' });
 
     const active = document.getElementById('sc-active-items');
     const saved = document.getElementById('sc-saved-cart-items');
     const badge = document.getElementById('nav-cart-count');
+    const cart = document.getElementById('sc-active-cart');
     const buyBox = document.getElementById('sc-buy-box');
+    window.__giftClicks = 0;
 
+    function selectedRows() {
+      return Array.from(active.querySelectorAll('.sc-list-item')).filter(r => r.dataset.isselected === '1');
+    }
     function render() {
       const rows = Array.from(active.querySelectorAll('.sc-list-item'));
-      const selected = rows.filter(r => !withCheckboxes || r.querySelector('input[type=checkbox]').checked);
       const units = rows.reduce((n, r) => n + parseInt(r.dataset.quantity, 10), 0);
       badge.textContent = String(units);
+      cart.dataset.cartTotalItemCount = String(units);
       buyBox.dataset.quantity = String(units);
-      const selUnits = selected.reduce((n, r) => n + parseInt(r.dataset.quantity, 10), 0);
+      const selUnits = selectedRows().reduce((n, r) => n + parseInt(r.dataset.quantity, 10), 0);
       document.getElementById('sc-subtotal-label-buybox').textContent = 'Subtotal (' + selUnits + ' items):';
       document.querySelector('input[name=proceedToRetailCheckout]').value =
         'Proceed to checkout (' + selUnits + ' item' + (selUnits === 1 ? '' : 's') + ')';
     }
-
+    function stepperLabels(div, item) {
+      const q = parseInt(div.dataset.quantity, 10);
+      const fs = div.querySelector('fieldset');
+      fs.dataset.steppervalue = String(q);
+      fs.querySelector('legend').textContent = 'Quantity is ' + q;
+      fs.querySelector('[data-a-selector="inner-value"]').textContent = String(q);
+      const dec = fs.querySelector('[data-a-selector="decrement"]');
+      dec.setAttribute('aria-label', q > 1 ? 'Decrease quantity by one, Quantity is ' + q + ', ' + item.title : 'Delete ' + item.title);
+      fs.querySelector('[data-a-selector="increment"]').setAttribute('aria-label', 'Increase quantity by one, Quantity is ' + q + ', ' + item.title);
+    }
     function row(item) {
+      const id = 'I' + Math.random().toString(36).slice(2, 8);
       const div = document.createElement('div');
-      div.className = 'sc-list-item';
+      div.className = 'a-row sc-list-item';
+      div.setAttribute('role', 'listitem');
       if (item.asin) div.setAttribute('data-asin', item.asin);
-      div.setAttribute('data-itemid', 'I' + Math.random().toString(36).slice(2, 8));
+      div.setAttribute('data-itemid', id);
       div.setAttribute('data-quantity', String(item.qty));
+      div.setAttribute('data-isselected', '1');
+      div.setAttribute('data-producttitle', item.title);
       div.innerHTML =
-        (withCheckboxes ? '<input type="checkbox" aria-label="Select ' + item.title + ' for checkout" checked>' : '') +
-        '<span class="sc-product-title">' + item.title + '</span>' +
-        '<div class="sc-quantity-stepper"><button type="button" aria-label="Decrease quantity by one">−</button>' +
-        '<span aria-label="Quantity is ' + item.qty + '">' + item.qty + '</span>' +
-        '<button type="button" aria-label="Increase quantity by one">+</button></div>' +
-        '<input type="button" data-action="save-for-later" value="Save for later">' +
-        '<input type="button" data-action="delete" value="Delete">';
-      div.querySelector('[aria-label="Decrease quantity by one"]').addEventListener('click', function () {
-        const q = Math.max(1, parseInt(div.dataset.quantity, 10) - 1);
+        '<div class="sc-list-item-removed-msg" style="display:none">' +
+        '  <div class="sc-list-item-removed-msg-delete" data-action="delete" style="display:none">removed</div>' +
+        '  <div class="sc-list-item-removed-msg-save-for-later" data-action="save-for-later" style="display:none">saved</div>' +
+        '</div>' +
+        '<div class="sc-list-item-content">' +
+        (withCheckboxes ? '<span class="sc-item-checkbox"><div class="a-checkbox sc-list-item-checkbox"><label><input type="checkbox" aria-label="Select ' + item.title + ' for checkout" checked></label></div></span>' : '') +
+        '  <span class="sc-product-title">' + item.title + '</span>' +
+        '  <div class="a-checkbox sc-gift-option"><label><input type="checkbox" class="gift" aria-label="This will be a gift"><span>This will be a gift</span></label></div>' +
+        '  <div class="sc-action-links">' +
+        '    <span class="sc-quantity-stepper"><fieldset name="sc-quantity" data-action="a-stepper" data-steppervalue="' + item.qty + '" data-valuemin="1">' +
+        '      <legend class="a-offscreen">Quantity is ' + item.qty + '</legend>' +
+        '      <button type="button" data-action="a-stepper-decrement" data-a-selector="decrement"><span class="a-icon"></span></button>' +
+        '      <span data-a-selector="value"><span data-a-selector="inner-value">' + item.qty + '</span></span>' +
+        '      <button type="button" data-action="a-stepper-increment" data-a-selector="increment"><span class="a-icon"></span></button>' +
+        '    </fieldset></span>' +
+        '    <span data-action="delete-active"><input name="submit.delete-active.' + id + '" value="Delete" data-action="delete-active" aria-label="Delete ' + item.title + '" type="button"></span>' +
+        '    <span data-action="save-for-later"><input name="submit.save-for-later.' + id + '" value="Save for later" data-action="save-for-later" aria-label="Save for later ' + item.title + '" type="button"></span>' +
+        '  </div>' +
+        '</div>';
+      stepperLabels(div, item);
+      div.querySelector('[data-a-selector="decrement"]').addEventListener('click', function () {
+        const q = parseInt(div.dataset.quantity, 10);
         setTimeout(function () {
-          div.dataset.quantity = String(q);
-          const lbl = div.querySelector('[aria-label^="Quantity is"]');
-          lbl.setAttribute('aria-label', 'Quantity is ' + q); lbl.textContent = String(q);
+          if (q <= 1) { div.remove(); render(); return; }  // live behaviour: trash at quantity 1
+          div.dataset.quantity = String(q - 1);
+          stepperLabels(div, item);
           render();
         }, 150);
       });
-      div.querySelector('[data-action="save-for-later"]').addEventListener('click', function () {
+      div.querySelector('input[data-action="save-for-later"]').addEventListener('click', function () {
         setTimeout(function () { saved.appendChild(div); render(); }, 150);
       });
-      div.querySelector('[data-action="delete"]').addEventListener('click', function () {
+      div.querySelector('input[data-action="delete-active"]').addEventListener('click', function () {
         setTimeout(function () { div.remove(); render(); }, 150);
       });
-      if (withCheckboxes) div.querySelector('input[type=checkbox]').addEventListener('change', render);
+      div.querySelector('input.gift').addEventListener('click', function () { window.__giftClicks++; });
+      if (withCheckboxes) {
+        div.querySelector('.sc-list-item-checkbox input').addEventListener('change', function (e) {
+          setTimeout(function () { div.dataset.isselected = e.target.checked ? '1' : '0'; render(); }, 100);
+        });
+      }
       return div;
     }
     items.forEach(i => active.appendChild(row(i)));
@@ -89,8 +137,7 @@
 
     document.getElementById('activeCartViewForm').addEventListener('submit', function (e) {
       e.preventDefault();
-      const rows = Array.from(active.querySelectorAll('.sc-list-item'))
-        .filter(r => !withCheckboxes || r.querySelector('input[type=checkbox]').checked);
+      const rows = selectedRows();
       let fixture = window.__checkoutFixture || 'checkout_review';
       if (rows.length > 1) fixture = 'two_items';
       else if (rows.length === 1 && parseInt(rows[0].dataset.quantity, 10) > 1) fixture = 'qty_two';

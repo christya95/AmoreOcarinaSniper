@@ -32,7 +32,7 @@
 <script>
   (function () {
     const variant = window.__cartFixture || 'clean';
-    const before = { clean: 0, clean_no_sidesheet: 0, extra_item: 1, qty_two: 1, checkboxes: 1, missing_target: 0, unreadable_rows: 0 }[variant] ?? 0;
+    const before = { clean: 0, clean_no_sidesheet: 0, extra_item: 1, qty_two: 1, qty_three: 2, checkboxes: 1, missing_target: 0, unreadable_rows: 0 }[variant] ?? 0;
     const badge = document.getElementById('nav-cart-count');
     badge.textContent = String(before);
     document.getElementById('add-to-cart-button').addEventListener('click', function () {

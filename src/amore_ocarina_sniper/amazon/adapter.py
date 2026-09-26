@@ -47,6 +47,7 @@ class PurchaseAdapter(Protocol):
 
 
 _HEAVY_TYPES = {"image", "font", "media"}
+MAX_CART_TIDY_PASSES = 6  # one decrement per pass -> handles a leftover quantity up to 6
 
 
 async def _abort_heavy_assets(route) -> None:
@@ -217,11 +218,15 @@ class AmazonAdapter:
 
     # ------------------------------------------------------------ cart path
     async def _cart_units(self) -> int | None:
-        """Total units in the cart per the nav badge (None when unreadable)."""
+        """Units in the cart: the cart page's own attribute when present, else the nav badge."""
         try:
             text = await self.page.evaluate(
-                "(sel) => { const el = document.querySelector(sel); return el ? el.innerText : null; }",
-                S.NAV_CART_COUNT,
+                """(spec) => {
+                  const cart = document.querySelector(spec.cart);
+                  if (cart) return cart.getAttribute('data-cart-total-item-count');
+                  const el = document.querySelector(spec.badge); return el ? el.innerText : null;
+                }""",
+                {"cart": S.CART_TOTAL_ITEM_COUNT, "badge": S.NAV_CART_COUNT},
             )
         except Exception:
             return None
@@ -281,21 +286,30 @@ class AmazonAdapter:
               return { matched, rows: rows.map((row, i) => {
                 let qty = num(row.getAttribute(spec.qtyAttr));
                 if (qty === null) {
+                  const f = row.querySelector(spec.qtyStepper);
+                  if (f) qty = num(f.dataset.steppervalue);
+                }
+                if (qty === null) {
                   const l = row.querySelector(spec.qtyLabel);
-                  if (l) qty = num(l.getAttribute('aria-label'));
+                  if (l) qty = num(l.getAttribute('aria-label') || l.textContent);
                 }
                 if (qty === null) { const s = row.querySelector(spec.qtySelect); if (s) qty = num(s.value); }
                 let cb = null;
                 for (const sel of spec.checkbox) { cb = row.querySelector(sel); if (cb) break; }
-                return { asin: (row.dataset.asin || '').toUpperCase(), qty, checkbox: !!cb,
-                         checked: cb ? !!cb.checked : null, index: i };
+                let checked = cb ? !!cb.checked : null;
+                const sel = row.getAttribute(spec.selectedAttr);
+                if (checked === null && sel !== null) checked = sel === '1' || sel === 'true';
+                return { asin: (row.dataset.asin || '').toUpperCase(), qty, checkbox: !!cb || sel !== null,
+                         checked, index: i };
               }) };
             }""",
             {
                 "rows": list(S.CART_PAGE["rows"]),
                 "qtyAttr": S.CART_PAGE["row_quantity_attr"],
+                "qtyStepper": S.CART_PAGE["row_quantity_stepper"],
                 "qtyLabel": S.CART_PAGE["row_quantity_label"],
                 "qtySelect": S.CART_PAGE["row_quantity_select"],
+                "selectedAttr": S.CART_PAGE["row_selected_attr"],
                 "checkbox": list(S.CART_PAGE["row_checkbox"]),
             },
         )
@@ -348,7 +362,7 @@ class AmazonAdapter:
                 if passes:
                     log.info("cart tidied in %d pass(es): only %s x1 remains active", passes, target_asin)
                 return
-            if time.monotonic() > deadline or passes >= 4:
+            if time.monotonic() > deadline or passes >= MAX_CART_TIDY_PASSES:
                 raise ChallengeDetected(
                     ChallengeKind.UNKNOWN_PAGE,
                     f"cart could not be reduced to the single target item (rows={rows})",
@@ -371,10 +385,11 @@ class AmazonAdapter:
                 if await sel.count():
                     await sel.select_option("1")
                 else:
-                    for _ in range(min(target["qty"] - 1, 9)):
-                        if not await self._click_in_row(loc, S.CART_PAGE["row_quantity_decrement"]):
-                            break
-                        await asyncio.sleep(0.25)
+                    # ONE decrement per pass, then re-read: on the live stepper the same button
+                    # turns into "Delete" once the quantity reaches 1, so a burst could remove
+                    # the target. The decrement selectors additionally require the
+                    # "Decrease quantity" label, so a stale click cannot delete either.
+                    await self._click_in_row(loc, S.CART_PAGE["row_quantity_decrement"])
             await asyncio.sleep(0.4)  # optimistic DOM updates settle
 
     async def _wait_for_checkout_surface(self):

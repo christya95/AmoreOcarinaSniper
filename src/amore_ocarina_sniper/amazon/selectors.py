@@ -103,12 +103,16 @@ TURBO_IFRAME = ("#turbo-checkout-iframe", "iframe[name='turbo-checkout-iframe']"
 
 # ---------------------------------------------------------------------------- cart path
 # Pre-orders on this listing expose only "Pre-order now" (the add-to-cart slot), so the cart
-# path is the primary path, not a fallback. Container ids, the cart-count attribute, the
-# stepper/checkbox aria-labels and the "Proceed to checkout (N items)" wording were read from
-# the live (empty, signed-out) cart page's string table on 2026-09-25; item-row controls are
-# ASSUMED because an anonymous session can no longer hold items.
+# path is the primary path, not a fallback. Everything below marked VERIFIED was read from the
+# operator's signed-in cart page (one item) on 2026-09-25 21:04: rows are
+# div.sc-list-item[data-asin][data-quantity][data-isselected] inside ul[data-name="Active
+# Items"]; the quantity control is an atomic stepper (<fieldset data-action="a-stepper"
+# data-steppervalue>) whose decrement <button> is labelled "Decrease quantity by one, …" at
+# quantity ≥ 2 but "Delete …" (trash) at quantity 1 — hence one decrement per pass, never a
+# burst; each row also carries a *gift* checkbox, so the checkout checkbox must be scoped.
 CART_URL = "https://www.amazon.ca/gp/cart/view.html"
 NAV_CART_COUNT = "#nav-cart-count"  # VERIFIED (total units in cart)
+CART_TOTAL_ITEM_COUNT = "#sc-active-cart[data-cart-total-item-count]"  # VERIFIED (attr)
 
 # After clicking add-to-cart, any of these means the add registered (side sheet, "added to
 # cart" page, or the cart itself). ASSUMED except NAV_CART_COUNT changing.
@@ -134,36 +138,37 @@ CART_PAGE = {
     "saved": "#sc-saved-cart",  # VERIFIED
     "buy_box": "#sc-buy-box",  # VERIFIED (data-quantity = units in active cart)
     "rows": (
-        "#sc-active-cart .sc-list-item[data-asin]",
+        "#sc-active-cart .sc-list-item[data-asin]",  # VERIFIED
         "#sc-active-cart [data-asin][data-itemid]",
         "#sc-active-cart [data-asin]",
-    ),  # ASSUMED
-    "row_quantity_attr": "data-quantity",  # ASSUMED (legacy rows)
-    "row_quantity_label": "[aria-label^='Quantity is']",  # VERIFIED wording ("Quantity is {n}")
-    "row_quantity_select": "select[name='quantity']",  # ASSUMED (legacy rows)
+    ),
+    "row_quantity_attr": "data-quantity",  # VERIFIED
+    "row_selected_attr": "data-isselected",  # VERIFIED ("1" when ticked for checkout)
+    "row_quantity_stepper": "fieldset[data-action='a-stepper'][data-steppervalue]",  # VERIFIED
+    "row_quantity_label": "[aria-label^='Quantity is'], legend",  # VERIFIED (legend text)
+    "row_quantity_select": "select[name='quantity']",  # ASSUMED (legacy rows only)
     "row_quantity_decrement": (
-        "[aria-label*='Decrease quantity' i]",  # VERIFIED wording
-        "input[data-a-selector='decrement']",
-        "[data-action='a-stepper-decrement']",
+        # Only ever clicked when the row quantity is >= 2 (at 1 the same button deletes).
+        "button[data-action='a-stepper-decrement'][aria-label*='Decrease quantity' i]",  # VERIFIED
+        "[data-a-selector='decrement'][aria-label*='Decrease quantity' i]",
+        "[aria-label*='Decrease quantity' i]",
     ),
     "row_checkbox": (
+        ".sc-list-item-checkbox input[type='checkbox']",  # VERIFIED
         "input[type='checkbox'][aria-label*='for checkout' i]",  # VERIFIED wording
-        "input[type='checkbox']",
     ),
     "row_save_for_later": (
-        "input[data-action='save-for-later']",
-        "[data-action='save-for-later'] input",
+        "input[data-action='save-for-later']",  # VERIFIED (name=submit.save-for-later.<itemid>)
+        "input[name^='submit.save-for-later']",
         "input[value='Save for later']",
-        "input[aria-label*='Save for later' i]",
-        "[data-a-selector='save-for-later'] input",
-    ),  # ASSUMED
+        "input[aria-label^='Save for later' i]",
+    ),
     "row_delete": (
+        "input[data-action='delete-active']",  # VERIFIED (name=submit.delete-active.<itemid>)
+        "input[name^='submit.delete-active']",
         "input[data-action='delete']",
-        "input[data-action='delete-active']",
-        "[data-action='delete'] input",
         "input[value='Delete']",
-        "input[aria-label*='Delete' i]",
-    ),  # ASSUMED
+    ),
     "proceed": (
         "input[name='proceedToRetailCheckout']",
         "#sc-buy-box-ptc-button input",

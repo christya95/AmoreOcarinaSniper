@@ -266,9 +266,12 @@ async def test_preorder_cart_page_when_no_side_sheet(config):
     assert snap.line_item_count == 1 and snap.quantity == 1
 
 
-@pytest.mark.parametrize("variant", ["extra_item", "qty_two", "checkboxes"])
+@pytest.mark.parametrize("variant", ["extra_item", "qty_two", "qty_three", "checkboxes"])
 async def test_cart_is_tidied_to_single_target_unit(config, variant):
-    """Unrelated item / leftover quantity / checkbox cart -> exactly [target x1] at checkout."""
+    """Unrelated item / leftover quantity / checkbox cart -> exactly [target x1] at checkout.
+
+    The fixture mirrors the live stepper: at quantity 1 the decrement button becomes Delete,
+    so qty_three also proves the one-decrement-per-pass rule never removes the target."""
     routing = Routing(product=PREORDER_CART_ONLY, cart=variant)
     adapter = await start_adapter(_preorder_config(config), routing)
     try:

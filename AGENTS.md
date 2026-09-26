@@ -206,9 +206,14 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
   badge == 1 and side-sheet *Proceed to checkout* visible → straight to checkout; otherwise
   cart page → `_tidy_cart` (untick / Save for later / Delete non-target rows, step target qty
   to 1, ≤ 4 passes, bounded) → Proceed. Target missing from cart → fail closed. Rows unreadable
-  → proceed, review-page gate decides. Cart container ids, badge, stepper/checkbox aria-labels
-  and PTC wording live-verified from the cart string table; item-row controls ASSUMED.
-  Fixtures `product_preorder_cart_only.html`, `cart.html` (7 variants); 7 new browser tests.
+  → proceed, review-page gate decides.
+- 21:04 operator pasted `#sc-active-cart` outerHTML from the signed-in cart (one item): rows,
+  `data-quantity`/`data-isselected`, checkout checkbox (`.sc-list-item-checkbox`), gift checkbox
+  (must be avoided), atomic stepper (`fieldset[data-action=a-stepper][data-steppervalue]`; the
+  decrement `button` is **Delete** at qty 1), `input[data-action=save-for-later|delete-active]`
+  all VERIFIED; fixture rebuilt to mirror it; decrement is now one click per pass (≤ 6 passes).
+  Still ASSUMED: `proceedToRetailCheckout` button (outside the pasted block) and side-sheet ids.
+  Fixtures `product_preorder_cart_only.html`, `cart.html` (8 variants); 8 browser tests.
 
 ### Next up
 - [ ] Operator: install ntfy on iPhone, subscribe to the `[notify].ntfy_topic` in `config.toml`,
