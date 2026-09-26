@@ -212,7 +212,9 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
   (must be avoided), atomic stepper (`fieldset[data-action=a-stepper][data-steppervalue]`; the
   decrement `button` is **Delete** at qty 1), `input[data-action=save-for-later|delete-active]`
   all VERIFIED; fixture rebuilt to mirror it; decrement is now one click per pass (≤ 6 passes).
-  Still ASSUMED: `proceedToRetailCheckout` button (outside the pasted block) and side-sheet ids.
+  21:16 operator pasted the cart *Proceed to checkout* input → VERIFIED (`name`, `data-feature-id`,
+  `aria-labelledby` all match the first candidates). Still ASSUMED: add-to-cart side-sheet ids,
+  every review-page field, confirmation markers, order-history URL — operator verifying next.
   Fixtures `product_preorder_cart_only.html`, `cart.html` (8 variants); 8 browser tests.
 
 ### Next up

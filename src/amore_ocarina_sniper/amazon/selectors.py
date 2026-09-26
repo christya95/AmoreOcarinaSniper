@@ -170,12 +170,15 @@ CART_PAGE = {
         "input[value='Delete']",
     ),
     "proceed": (
-        "input[name='proceedToRetailCheckout']",
+        # VERIFIED 2026-09-25 21:16 (operator paste): <input name="proceedToRetailCheckout"
+        #   data-feature-id="proceed-to-checkout-action" class="a-button-input" type="submit"
+        #   value="Proceed to checkout" aria-labelledby="sc-buy-box-ptc-button-announce">
+        "input[name='proceedToRetailCheckout']",  # VERIFIED
+        "input[data-feature-id='proceed-to-checkout-action']",  # VERIFIED
+        "input[aria-labelledby='sc-buy-box-ptc-button-announce']",  # VERIFIED
         "#sc-buy-box-ptc-button input",
         "#sc-buy-box-ptc-button",
-        "input[aria-labelledby='sc-buy-box-ptc-button-announce']",
-        "[data-feature-id='proceed-to-checkout-action'] input",
-    ),  # ASSUMED; label wording "Proceed to checkout (1 item)" VERIFIED
+    ),
 }
 
 CHECKOUT_PAGE: dict[str, Field] = {
