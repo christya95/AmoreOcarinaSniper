@@ -31,6 +31,7 @@ log = logging.getLogger("ocarina.watch")
 
 WATCH_CHANNEL_ID = "watch"  # synthetic channel id so store dedupe and status rows read clearly
 MAX_BACKOFF_S = 600.0
+HEARTBEAT_EVERY = 20  # polls between "still alive" log lines (~10 min at the default interval)
 
 
 def make_watch_event(target_id: str, at_ms: int | None = None) -> TriggerEvent:
@@ -114,6 +115,8 @@ class ProductWatcher:
         self._failures = 0
         self.polls += 1
         self._note_change(offer)
+        if self.polls % HEARTBEAT_EVERY == 0:
+            log.info("watch: alive, %d polls so far; availability=%r", self.polls, offer.availability)
 
         decision = evaluate_offer(offer, self.config.policy, self.config.target)
         if not decision.ok:
