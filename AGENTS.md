@@ -274,7 +274,8 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
   telemetry; if one appears, set `interval_s` back to 30.
 - [ ] Operator: install ntfy on iPhone, subscribe to the `[notify].ntfy_topic` in `config.toml`,
   run `ocarina notify-test`, confirm the push arrives.
-- [ ] Operator: verify Amazon default address / default payment card; empty the cart.
+- [~] Operator: verify Amazon default address / default payment card. Cart emptied
+  (rehearsal stand-in removed 2026-09-25 22:24).
 - [ ] After the first `watch_trigger` / `watch_challenge` in `telemetry.jsonl`: confirm Amazon
   tolerates the 30 s cadence on a signed-in session (no CAPTCHA); otherwise raise the interval.
 - [ ] Scheduled Task: `ocarina run --live` at logon (runner still comes up DISARMED by design).
