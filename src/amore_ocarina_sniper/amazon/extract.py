@@ -271,6 +271,8 @@ def detect_challenge_from_raw(raw: dict[str, Any]) -> str | None:
         return "captcha"
     if any(t in body[:4000] for t in S.CHALLENGES["access_denied_text"]):
         return "access_denied"
+    if any(t in body[:4000] for t in S.CHALLENGES["server_error_text"]):
+        return "server_error"
     if any(t in body for t in S.CHALLENGES["payment_challenge_text"]):
         return "payment_challenge"
     nav = normalize_text(_val(raw, "account_nav"))

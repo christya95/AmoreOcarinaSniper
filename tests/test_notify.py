@@ -93,6 +93,56 @@ async def test_purchase_and_refusal_push_to_phone(config, store, sink):
     assert out.order_id in received[1]["body"]
 
 
+async def test_retry_with_stock_present_pushes_an_informational_heads_up(config, store, sink):
+    from amore_ocarina_sniper.models import ChallengeDetected, ChallengeKind
+
+    url, received = sink
+    n = Notifier(NotifyConfig(ntfy_topic="t", ntfy_server=url))
+    adapter = FakeAdapter(dry_run=False)
+    coord = PurchaseCoordinator(
+        config=config, store=store, adapter=adapter, telemetry=Telemetry(None, enabled=False),
+        dry_run=False, notifier=n,
+    )
+    arm(store)
+    adapter.prepare_failures = [ChallengeDetected(ChallengeKind.SERVER_ERROR, "sorry! something went wrong")]
+    out = await coord.handle_trigger(event(1))
+    assert out.final_state == PurchaseState.PURCHASED
+    await n.close()
+    by_title = {r["headers"]["Title"]: r for r in received}  # delivery order is not deterministic
+    assert len(by_title) == 2
+    retry = next(r for t, r in by_title.items() if t.startswith("Stock seen"))
+    assert "Do NOT buy yet" in retry["body"]
+    assert retry["headers"]["Priority"] == "3"  # informational, below the REFUSED push
+    assert any(t.startswith("ORDER PLACED") for t in by_title)
+
+
+async def test_arm_expiry_warns_then_disarms_with_a_push(store, sink):
+    import time
+
+    from amore_ocarina_sniper.app import _expiry_watch
+
+    url, received = sink
+    n = Notifier(NotifyConfig(ntfy_topic="t", ntfy_server=url))
+    now = int(time.time() * 1000)
+    store.arm(now + 10 * 60_000, at_ms=now)  # expires in 10 min: inside the 30-min warning band
+    stop = asyncio.Event()
+    task = asyncio.create_task(_expiry_watch(store, stop, n, period_s=0.02))
+    await asyncio.sleep(0.1)
+    await n.close()
+    assert [r["headers"]["Title"] for r in received] == ["Bot arm window ends in 30 minutes"]
+
+    store.arm(now + 1, at_ms=now)  # expires within a millisecond of now
+    await asyncio.sleep(0.1)
+    stop.set()
+    await task
+    await n.close()
+    assert store.get_control().state == PurchaseState.DISARMED
+    titles = [r["headers"]["Title"] for r in received]
+    assert titles[-1] == "Bot DISARMED: armed session expired"
+    assert received[-1]["headers"]["Priority"] == "4"
+    assert len(titles) == 2  # the warning is not repeated
+
+
 async def test_dry_run_refusal_does_not_push(config, store, sink):
     url, received = sink
     n = Notifier(NotifyConfig(ntfy_topic="t", ntfy_server=url))

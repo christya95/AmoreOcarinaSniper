@@ -393,11 +393,19 @@ CHALLENGES = {
     "login_selectors": ("#ap_email", "#ap_password", "#signInSubmit"),
     "mfa_url_markers": ("/ap/mfa", "/ap/cvf"),
     "mfa_selectors": ("#auth-mfa-otpcode", "#cvf-page-content", "input[name='otpCode']"),
+    # A real block: Amazon names automated access / API support. Stops the bot.
     "access_denied_text": (
-        "sorry! something went wrong",
-        "request could not be satisfied",
         "access denied",
         "to discuss automated access",
+        "api-services-support@amazon.com",
+    ),
+    # Amazon's own error pages under load (the "dog" page, CloudFront 503). Transient: the
+    # attempt is retried, the watcher backs off mildly, the bot stays ARMED.
+    "server_error_text": (
+        "sorry! something went wrong",
+        "sorry, something went wrong",
+        "request could not be satisfied",
+        "service unavailable",
     ),
     "payment_challenge_text": (
         "verify your card",

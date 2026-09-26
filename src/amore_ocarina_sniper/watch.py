@@ -25,7 +25,6 @@ from .config import AppConfig
 from .models import (
     AttemptOutcome,
     ChallengeDetected,
-    ChallengeKind,
     OfferSnapshot,
     PurchaseState,
     TriggerEvent,
@@ -80,6 +79,7 @@ class ProductWatcher:
         self._challenges = 0  # captcha / login: exponential back-off
         self._last_signature: tuple | None = None
         self._cooldown_until = 0.0
+        self._refused_signature: tuple | None = None  # the offer policy refused; cooldown applies to it only
         self.polls = 0
         self.triggers = 0
 
@@ -113,13 +113,12 @@ class ProductWatcher:
         ctl = self.store.get_control()
         if ctl.state != PurchaseState.ARMED or not ctl.is_armed(now_ms()) or self.is_busy():
             return False
-        if time.monotonic() < self._cooldown_until:
-            return False
         try:
             offer = await self.adapter.poll_offer()
         except ChallengeDetected as exc:
-            if exc.kind == ChallengeKind.UNKNOWN_PAGE:
-                # Page did not render in time (overload / dog page), not a human check.
+            if exc.kind.transient:
+                # Page did not render in time or Amazon served its error page (overload),
+                # not a human check.
                 self._failures += 1
                 log.warning("watch: product page did not render (%s); retrying soon", exc)
                 self.telemetry.emit("watch_error", error=str(exc), failures=self._failures)
@@ -150,6 +149,11 @@ class ProductWatcher:
         decision = evaluate_offer(offer, self.config.policy, self.config.target)
         if not decision.ok:
             return False
+        if time.monotonic() < self._cooldown_until and self._signature(offer) == self._refused_signature:
+            # Same offer the review page just refused (price/seller/...): a full attempt every
+            # interval gains nothing. A *different* offer (Amazon's listing replacing a
+            # third party's, a price change) is evaluated right away.
+            return False
         event = make_watch_event(self.config.target.target_id)
         self.store.record_event(event)
         self.triggers += 1
@@ -166,10 +170,15 @@ class ProductWatcher:
             # full attempt gains nothing. A *transient* failure is different — the next poll
             # should try again as soon as the page still shows the offer.
             self._cooldown_until = time.monotonic() + self.config.watch.retrigger_cooldown_s
+            self._refused_signature = self._signature(offer)
         return True
 
+    @staticmethod
+    def _signature(offer: OfferSnapshot) -> tuple:
+        return (offer.in_stock, offer.is_preorder, offer.availability, str(offer.price), offer.seller)
+
     def _note_change(self, offer: OfferSnapshot) -> None:
-        sig = (offer.in_stock, offer.is_preorder, offer.availability, str(offer.price), offer.seller)
+        sig = self._signature(offer)
         if sig != self._last_signature:
             self._last_signature = sig
             log.info(

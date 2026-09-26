@@ -269,7 +269,28 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
   back-off changes; adapter `promote_watch_page`, `_loaded_at`, `verify_offer(reuse_within_s)`.
   226 tests. Host `interval_s = 15`. Runner restarted LIVE.
 
+### Edge-case pass 2 — 2026-09-25 22:30 (code review of the critical path)
+- **Amazon's overload page was classified as a ban**: "sorry! something went wrong" / "request
+  could not be satisfied" mapped to `access_denied` → `NEEDS_ATTENTION` → bot parked for the
+  rest of the drop. New `ChallengeKind.SERVER_ERROR` (transient; `ChallengeKind.transient`),
+  `CHALLENGES["server_error_text"]`; `access_denied_text` keeps only the real block markers.
+- Evidence on the failure path was captured **after** `abandon()` had navigated back to the
+  product page (screenshot of the wrong page). Now captured first, with HTML, only on the
+  final pass (`challenge-<kind>` / `pre-intent-error`), never before a retry.
+- Retry reused nothing: `abandon()` reloads the product page and the retry reloaded it again.
+  `abandon()` now records `_loaded_at`; retries pass `reuse_within_s`.
+- Review page with only disabled *Place order* blockers / an interstitial returned a snapshot
+  the policy could only refuse → benign refusal → 120 s watcher cooldown mid-drop. Now waits for
+  a *visible* enabled control, else raises transient `unknown_page` (retried).
+- Watcher cooldown is bound to the refused offer's signature (in_stock, preorder, availability,
+  price, seller); a different offer triggers immediately. Polling continues during cooldown.
+- Pushes: informational *Stock seen — bot retrying* on the first retry when an offer was present;
+  *arm window ends in 30 minutes* and *DISARMED: armed session expired* from `_expiry_watch`.
+- 238 tests. **Operator decision pending:** `policy.max_arm_minutes` is 720 (12 h); the drop can
+  come at any hour before Oct 29 — consider 4320 (3 days) and arming for the full window.
+
 ### Next up
+- [ ] Operator: decide `policy.max_arm_minutes` (12 h now; re-arm daily or raise the cap).
 - [ ] After the first `watch_trigger` at 15 s cadence: confirm no `watch_challenge` in
   telemetry; if one appears, set `interval_s` back to 30.
 - [ ] Operator: install ntfy on iPhone, subscribe to the `[notify].ntfy_topic` in `config.toml`,
@@ -309,6 +330,12 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
 
 ## Decision log
 
+- 2026-09-25 22:30 — **Amazon error pages are transient, not challenges.** "Sorry! Something
+  went wrong" and CloudFront "request could not be satisfied" are Amazon's overload responses,
+  the most likely thing to be served during a pre-order rush; parking the bot on them would
+  have lost the window without any human check being involved. Only *Access Denied* /
+  *automated access* text stops the bot now. Revert: move the strings back to
+  `access_denied_text` in `selectors.py`.
 - 2026-09-25 22:10 — **Rush hardening**, operator's call after the "what happens when everyone
   clicks" review. (a) Pre-intent transient failures (`unknown_page`, browser `TimeoutError`)
   are retried ≤ 2× within the trigger and otherwise return to `ARMED` (push after a streak of

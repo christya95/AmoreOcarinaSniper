@@ -75,7 +75,23 @@ async def test_refused_attempt_starts_cooldown(config, store):
     arm(store)
     assert await watcher.tick() is True  # dry-run attempt: not PURCHASED -> cooldown
     assert await watcher.tick() is False
-    assert adapter.calls.count("poll_offer") == 1  # cooled down: no second poll at all
+    # Still polls (one page load, same as any tick) but does not re-run a full attempt on the
+    # very offer that was just refused.
+    assert adapter.calls.count("poll_offer") == 2
+    assert adapter.calls.count("verify_offer") == 1
+
+
+async def test_cooldown_lifts_when_the_offer_changes(config, store):
+    """A third-party listing refused by policy must not blind the watcher to Amazon's own
+    offer appearing 20 s later: the cooldown is bound to the refused offer's signature."""
+    watcher, _, adapter = build(config, store, dry_run=True, cooldown=3600)
+    arm(store)
+    assert await watcher.tick() is True
+    assert await watcher.tick() is False  # same offer -> cooled down
+    adapter.poll_result = replace(adapter.offer, seller="Amazon")  # different signature
+    assert await watcher.tick() is True  # evaluated and triggered immediately
+    assert adapter.calls.count("verify_offer") == 2
+    assert await watcher.tick() is False  # and the new refusal cools down the *new* signature
 
 
 async def test_live_purchase_via_watcher_then_stops(config, store):

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any, Protocol
@@ -508,11 +509,18 @@ class AmazonAdapter:
             url = self.page.url.lower()
             if "/buy/" in url or "/checkout" in url:
                 try:
+                    # Visible, not merely attached: the live page carries disabled blocker
+                    # buttons while a selection updates; the enabled one appears when it is done.
                     await self.page.wait_for_selector(
-                        place_sel, state="attached", timeout=cfg.checkout.element_timeout_ms
+                        place_sel, state="visible", timeout=cfg.checkout.element_timeout_ms
                     )
-                except Exception:
+                except Exception as exc:
                     await self._raise_if_challenge(self.page)
+                    # Interstitial (address/payment prompt, error page) or still updating:
+                    # transient, the coordinator may retry from the product page.
+                    where = re.sub(r"\d{3,}", "<n>", url.split("?", 1)[0])  # no purchase ids in logs
+                    detail = f"checkout page without an enabled place-order control ({where})"
+                    raise ChallengeDetected(ChallengeKind.UNKNOWN_PAGE, detail) from exc
                 return self.page
             frame_el = await self.page.query_selector(iframe_sel)
             if frame_el:
@@ -588,6 +596,8 @@ class AmazonAdapter:
             )
         try:
             await self.page.goto(self.config.target.url, wait_until="domcontentloaded")
+            # A retry that follows may read this load instead of paying for another one.
+            self._loaded_at[id(self.page)] = time.monotonic()
         except Exception as exc:  # pragma: no cover
             log.warning("abandon navigation failed: %s", exc)
 

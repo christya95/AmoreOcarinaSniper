@@ -113,7 +113,14 @@ class ChallengeKind(enum.StrEnum):
     MFA = "mfa"
     ACCESS_DENIED = "access_denied"
     PAYMENT_CHALLENGE = "payment_challenge"
+    # Amazon's own error page ("Sorry! Something went wrong", CloudFront 5xx): overload, not a
+    # human check. Transient like UNKNOWN_PAGE; never parks the bot.
+    SERVER_ERROR = "server_error"
     UNKNOWN_PAGE = "unknown_page"
+
+    @property
+    def transient(self) -> bool:
+        return self in (ChallengeKind.UNKNOWN_PAGE, ChallengeKind.SERVER_ERROR)
 
 
 class ChallengeDetected(Exception):

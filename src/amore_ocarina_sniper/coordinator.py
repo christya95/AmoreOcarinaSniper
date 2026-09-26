@@ -19,7 +19,6 @@ from .config import AppConfig
 from .models import (
     AttemptOutcome,
     ChallengeDetected,
-    ChallengeKind,
     PurchaseState,
     TriggerEvent,
 )
@@ -46,7 +45,7 @@ TRANSIENT_STREAK_NOTIFY = 3
 def is_transient(exc: BaseException) -> bool:
     """Timing failures that leave nothing submitted and are worth one more try."""
     if isinstance(exc, ChallengeDetected):
-        return exc.kind == ChallengeKind.UNKNOWN_PAGE
+        return exc.kind.transient
     # Playwright's TimeoutError is not the builtin one; match by name to avoid a hard
     # dependency on the browser library in the state machine.
     return type(exc).__name__ == "TimeoutError"
@@ -178,26 +177,42 @@ class PurchaseCoordinator:
             try:
                 result = await self._verify_and_prepare(event, tl, attempt)
             except Exception as exc:  # noqa: BLE001 - pre-intent failures must never leave BUSY states
-                await self._abandon()
                 transient = is_transient(exc)
+                retrying = transient and attempt < MAX_TRANSIENT_RETRIES
+                artifact = None
+                if not retrying:
+                    # Evidence of the page that failed, BEFORE abandon() navigates away from it.
+                    # The attempt is already over, so this is off the critical path. HTML too:
+                    # if it is selector drift rather than load, it is fixable offline.
+                    label = "pre-intent-error"
+                    if isinstance(exc, ChallengeDetected):
+                        label = f"challenge-{exc.kind.value}"
+                    artifact = await self.adapter.capture_artifact(label, html=True)
+                await self._abandon()
                 if transient and killswitch.is_engaged(self.kill_switch_path):
                     ctl = self._finish(eid, PurchaseState.DISARMED, "kill switch engaged during retry")
                     return AttemptOutcome(eid, ctl.state, "kill switch engaged")
-                if transient and attempt < MAX_TRANSIENT_RETRIES:
+                if retrying:
                     log.warning("attempt %s: transient failure (%s); retrying (%d left)",
                                 eid, exc, MAX_TRANSIENT_RETRIES - attempt)
                     self.telemetry.emit("transient_retry", event_id=eid, error=str(exc), pass_no=attempt + 1)
                     tl.mark(f"retry_{attempt + 1}")
+                    if attempt == 0 and self._offer_was_present:
+                        # Stock is there and Amazon is struggling: tell the operator to be at
+                        # the screen. Informational — the "robot first" rule still applies.
+                        self.notifier.fire(
+                            "Stock seen — bot retrying after a timeout",
+                            f"{exc}. Do NOT buy yet; wait for ORDER PLACED or REFUSED.",
+                            tags="hourglass",
+                        )
                     continue
                 if isinstance(exc, ChallengeDetected) and not transient:
                     kind = exc.kind.value
-                    artifact = await self.adapter.capture_artifact(f"challenge-{kind}")
                     reason = f"challenge before submission: {exc}"
                     ctl = self._finish(eid, PurchaseState.NEEDS_ATTENTION, reason)
                     self.telemetry.emit("challenge", event_id=eid, challenge=kind, artifact=artifact)
                     return AttemptOutcome(eid, ctl.state, f"needs attention: {exc}")
                 if transient:
-                    artifact = await self.adapter.capture_artifact("transient-failure")
                     self.telemetry.emit("transient_failure", event_id=eid, error=str(exc), artifact=artifact)
                     return self._finish_transient(eid, f"transient failure before submission: {exc}")
                 log.exception("pre-intent failure for %s", eid)
@@ -211,7 +226,10 @@ class PurchaseCoordinator:
         """Offer + review-page policy. Returns an AttemptOutcome (refusal) or None (all passed)."""
         eid = event.event_id
         policy, target = self.config.policy, self.config.target
-        reuse = WATCH_PAGE_REUSE_S if (event.source == "watcher" and attempt == 0) else 0.0
+        # Pass 0 of a watcher trigger starts from the tab the watcher just read; a retry pass
+        # starts from the product page abandon() just reloaded. Both are seconds old at most;
+        # verify_offer() reloads anyway if the page is older than the window or elsewhere.
+        reuse = WATCH_PAGE_REUSE_S if (attempt > 0 or event.source == "watcher") else 0.0
         offer = await self.adapter.verify_offer(reuse_within_s=reuse)
         tl.mark("offer_verified")
         decision = evaluate_offer(offer, policy, target)

@@ -13,6 +13,7 @@ from amore_ocarina_sniper.amazon.adapter import DryRunRefusal
 from amore_ocarina_sniper.coordinator import (
     MAX_CONSECUTIVE_PRE_INTENT_FAILURES,
     MAX_TRANSIENT_RETRIES,
+    WATCH_PAGE_REUSE_S,
     PurchaseCoordinator,
 )
 from amore_ocarina_sniper.models import ChallengeDetected, ChallengeKind, PurchaseState, TriggerEvent
@@ -230,8 +231,43 @@ async def test_transient_timeout_is_retried_then_purchases(live):
     assert out.final_state == PurchaseState.PURCHASED
     assert adapter.calls.count("prepare_checkout") == 2
     assert adapter.calls.count("submit_order") == 1
-    # The retry re-verifies the offer from a fresh navigation (no page reuse on retries).
-    assert adapter.reuse_requests == [0.0, 0.0]
+    # The retry re-verifies the offer from the product page abandon() just reloaded (bounded
+    # reuse window; anything older is navigated again by the adapter).
+    assert adapter.reuse_requests == [0.0, WATCH_PAGE_REUSE_S]
+    # No evidence capture while a retry is still to come (that would cost time on the path).
+    assert not any(c.startswith("capture_artifact") for c in adapter.calls)
+
+
+async def test_amazon_error_page_is_retried_like_a_timeout(live):
+    """The 'Sorry! Something went wrong' page under load is overload, not a ban."""
+    coord, adapter, store = live
+    adapter.prepare_failures = [ChallengeDetected(ChallengeKind.SERVER_ERROR, "sorry! something went wrong")]
+    arm(store)
+    out = await coord.handle_trigger(event())
+    assert out.final_state == PurchaseState.PURCHASED
+    assert adapter.calls.count("prepare_checkout") == 2
+
+
+async def test_final_transient_failure_captures_evidence_before_abandon(live):
+    coord, adapter, store = live
+    adapter.fail_prepare = ChallengeDetected(ChallengeKind.UNKNOWN_PAGE, "checkout page without an enabled control")
+    arm(store)
+    out = await coord.handle_trigger(event())
+    assert out.transient and out.final_state == PurchaseState.ARMED
+    idx = adapter.calls.index("capture_artifact:challenge-unknown_page")
+    assert adapter.calls[idx + 1] == "abandon"  # screenshot shows the page that failed, not the product page
+    assert adapter.calls.count("capture_artifact:challenge-unknown_page") == 1  # only on the last pass
+
+
+async def test_access_denied_page_still_stops_the_bot(live):
+    coord, adapter, store = live
+    adapter.prepare_failures = [ChallengeDetected(ChallengeKind.ACCESS_DENIED, "to discuss automated access")]
+    arm(store)
+    out = await coord.handle_trigger(event())
+    assert out.final_state == PurchaseState.NEEDS_ATTENTION
+    assert adapter.calls.count("prepare_checkout") == 1
+    idx = adapter.calls.index("capture_artifact:challenge-access_denied")
+    assert adapter.calls[idx + 1] == "abandon"
 
 
 async def test_transient_failures_exhaust_retries_but_stay_armed(live):

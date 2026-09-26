@@ -201,3 +201,29 @@ def test_seller_aliases():
     assert not seller_allowed("Amazon Warehouse", ("amazon.ca",))
     assert not seller_allowed("Amazonian Deals", ("amazon.ca",))
     assert not seller_allowed(None, ("amazon.ca",))
+
+
+# ------------------------------------------------------- challenge classification (extract)
+def _raw(body: str, url: str = "https://www.amazon.ca/dp/X") -> dict:
+    return {"url": url, "bodyTextLower": body.lower(), "present": {}, "fields": {}}
+
+
+@pytest.mark.parametrize(
+    "body,kind",
+    [
+        ("Sorry! Something went wrong on our end. Please go back and try again.", "server_error"),
+        ("503 ERROR The request could not be satisfied.", "server_error"),
+        ("Access Denied You don't have permission to access this page.", "access_denied"),
+        ("To discuss automated access to Amazon data please contact api-services-support@amazon.com.",
+         "access_denied"),
+        ("Enter the characters you see below", "captcha"),
+        ("Nintendo Switch 2 - Pre-order now. Sold by Amazon.ca.", None),
+    ],
+)
+def test_amazon_error_pages_are_transient_but_blocks_are_not(body, kind):
+    from amore_ocarina_sniper.amazon.extract import detect_challenge_from_raw
+    from amore_ocarina_sniper.models import ChallengeKind
+
+    assert detect_challenge_from_raw(_raw(body)) == kind
+    if kind:
+        assert ChallengeKind(kind).transient == (kind == "server_error")

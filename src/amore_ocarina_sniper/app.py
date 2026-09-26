@@ -14,7 +14,7 @@ from .config import AppConfig
 from .coordinator import PurchaseCoordinator
 from .lock import ProcessLock
 from .models import PurchaseState
-from .notify import Notifier
+from .notify import PRIORITY_HIGH, Notifier
 from .store import StateStore, now_ms
 from .telemetry import Telemetry
 from .watch import ProductWatcher
@@ -22,19 +22,43 @@ from .watch import ProductWatcher
 log = logging.getLogger("ocarina.app")
 
 
-async def _expiry_watch(store: StateStore, stop: asyncio.Event) -> None:
-    """Flip ARMED -> DISARMED once the armed session expires (status clarity only)."""
+ARM_EXPIRY_WARNING_MS = 30 * 60_000
+
+
+async def _expiry_watch(
+    store: StateStore, stop: asyncio.Event, notifier: Notifier | None = None, *, period_s: float = 5.0
+) -> None:
+    """Flip ARMED -> DISARMED once the armed session expires, and tell the operator.
+
+    The arm window is the operator's safety net, so it is never extended here; but an
+    expiry nobody notices is how a drop is missed while the runner looks healthy.
+    """
+    warned_for: int | None = None  # armed_until_ms the 30-minute warning was sent for
     while not stop.is_set():
         ctl = store.get_control()
-        if (
-            ctl.state == PurchaseState.ARMED
-            and ctl.armed_until_ms is not None
-            and ctl.armed_until_ms <= now_ms()
-        ):
-            store.disarm("armed session expired")
-            log.info("armed session expired; now DISARMED")
+        now = now_ms()
+        if ctl.state == PurchaseState.ARMED and ctl.armed_until_ms is not None:
+            if ctl.armed_until_ms <= now:
+                store.disarm("armed session expired")
+                log.info("armed session expired; now DISARMED")
+                if notifier is not None:
+                    notifier.fire(
+                        "Bot DISARMED: armed session expired",
+                        "Nothing will be bought until you run `ocarina arm`.",
+                        priority=PRIORITY_HIGH,
+                        tags="warning",
+                    )
+            elif ctl.armed_until_ms - now <= ARM_EXPIRY_WARNING_MS and warned_for != ctl.armed_until_ms:
+                warned_for = ctl.armed_until_ms
+                log.info("armed session expires in <= %d min", ARM_EXPIRY_WARNING_MS // 60_000)
+                if notifier is not None:
+                    notifier.fire(
+                        "Bot arm window ends in 30 minutes",
+                        "Run `ocarina arm --minutes N` to stay armed.",
+                        tags="hourglass",
+                    )
         with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(stop.wait(), timeout=5.0)
+            await asyncio.wait_for(stop.wait(), timeout=period_s)
 
 
 async def run_forever(config: AppConfig, *, dry_run: bool, headless: bool) -> int:
@@ -83,7 +107,7 @@ async def run_forever(config: AppConfig, *, dry_run: bool, headless: bool) -> in
         if sys.platform != "win32":
             for sig in (signal.SIGINT, signal.SIGTERM):
                 loop.add_signal_handler(sig, stop.set)
-        tasks = [asyncio.create_task(_expiry_watch(store, stop))]
+        tasks = [asyncio.create_task(_expiry_watch(store, stop, notifier))]
         if config.watch.enabled:
             product_watcher = ProductWatcher(
                 config=config,

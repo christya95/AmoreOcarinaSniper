@@ -217,7 +217,7 @@ them in deliberately.**
 | `checkout.strategy` | `"buy_now"` (default) or `"cart"`. |
 | `watch.enabled` | Default `false`. Poll the product page yourself as a second trigger source (see *The product watcher*). |
 | `watch.interval_s` | Seconds between polls while armed (default 30, ±20 % jitter; values below 10 are refused). |
-| `watch.retrigger_cooldown_s` | After a watcher-started attempt that policy **refused**, wait this long before it may trigger again (default 120). Not applied after a transient timeout. |
+| `watch.retrigger_cooldown_s` | After a watcher-started attempt that policy **refused**, do not re-attempt the **same offer** (price/seller/availability unchanged) for this long (default 120). A changed offer triggers at once; a transient timeout starts no cooldown. |
 | `notify.ntfy_topic` | Empty = off. A long random topic name you also subscribe to in the ntfy phone app. Pushes on ORDER PLACED, stock‑seen‑but‑REFUSED, NEEDS_ATTENTION/UNKNOWN, first watch‑tab challenge, runner start. |
 | `telemetry.verbose` | Mirror every telemetry event into the console log. Diagnostic only. |
 
@@ -365,7 +365,11 @@ happen.
 | You are also watching with a phone stock app (HotStock etc.) | The robot cannot see your manual orders. Two orders are possible if you both buy in the same minute. | **Rule: robot first.** When your phone alerts, wait for the push: *ORDER PLACED* → do nothing; *REFUSED — buy manually* → go; no push within ~10 s → check `ocarina status`, then go manual. If you do buy manually, run `ocarina kill` immediately. |
 | Pre‑order button reads “Pre‑order now” | Same `#buy-now-button` / `#add-to-cart-button` ids; handled. Price/seller/condition still verified. | Keep `policy.allow_preorder = true`. |
 | Product page shows a variant/edition picker | Refused (`variant selector present`). | Nothing; the alert‑matched ASIN is a single edition. |
-| Amazon is slow or the add‑to‑cart fails during the rush | Step times out → retried up to 2× within the same trigger; if still failing, back to `ARMED` (`transient failure before submission`) with screenshot; the watcher polls again on its next tick with no cooldown. Push to your phone after 3 such triggers in a row. | If stock is visibly there and the push says *REFUSED — buy manually*, go manual. |
+| Amazon is slow or the add‑to‑cart fails during the rush | Step times out → retried up to 2× within the same trigger (the retry reuses the product page it just reloaded); if still failing, back to `ARMED` (`transient failure before submission`) with screenshot + HTML of the page that failed; the watcher polls again on its next tick with no cooldown. Pushes: *Stock seen — bot retrying* (informational, first retry) and a heads‑up after 3 such triggers in a row. | Be at the screen; do **not** buy on the *retrying* push. Go manual only on *REFUSED — buy manually*. |
+| Amazon's own error page (“Sorry! Something went wrong”, CloudFront *request could not be satisfied*) | Classified `server_error`: treated like a timeout (retried, stays `ARMED`, watcher backs off mildly). Only *Access Denied* / *automated access* pages stop the bot. | Nothing. |
+| Review page shows only the greyed‑out *Place your order* buttons (Amazon still updating a selection) or an address/payment interstitial | Waits up to `element_timeout_ms` for an **enabled, visible** button, then treats it as transient and retries from the product page instead of refusing and pausing the watcher. | Nothing. |
+| A third‑party seller lists first at an inflated price | Refused by policy; the watcher's `retrigger_cooldown_s` applies **only to that offer**. When the page changes (Amazon's offer appears, price changes) the next poll triggers immediately. | Nothing. |
+| Arm window about to lapse / lapsed | Push *arm window ends in 30 minutes*, then *DISARMED: armed session expired*. The window is never extended automatically. | `ocarina arm --minutes N` (≤ `policy.max_arm_minutes`). Raise `max_arm_minutes` in `config.toml` if 12 h is too short for your schedule. |
 | Review‑page selectors drift (Amazon layout change) | Unreadable field → refused with screenshot + all‑frame HTML in `runtime/artifacts/`; the bot stays armed. | Send the artifacts here; fixing a selector takes minutes. Re‑run the rehearsal (`--probe-asin`). |
 
 ---
@@ -431,7 +435,7 @@ someone else's alert bot for the first signal.
 ## 🧪 Tests
 
 ```powershell
-python -m pytest -q          # 226 tests, ~90 s (headless Chromium for fixture‑driven tests)
+python -m pytest -q          # 238 tests, ~95 s (headless Chromium for fixture‑driven tests)
 ruff check src tests
 ```
 

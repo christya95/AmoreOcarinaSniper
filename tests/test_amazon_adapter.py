@@ -248,7 +248,6 @@ async def test_checkout_review_parses_and_dry_run_refuses_submit(config):
         ("cvv_prompt", "payment requires manual input"),
         ("third_party_seller", "seller not allowed"),
         ("qty_two", "quantity 2"),
-        ("blocked", "place order control not available"),
     ],
 )
 async def test_checkout_variants_rejected(config, variant, fragment):
@@ -261,6 +260,24 @@ async def test_checkout_variants_rejected(config, variant, fragment):
     decision = evaluate_checkout(snap, config.policy, config.target)
     assert not decision.ok
     assert any(fragment in r for r in decision.reasons), decision.reasons
+
+
+async def test_checkout_with_only_disabled_place_order_is_transient(config):
+    """Amazon shows disabled blocker buttons while a selection updates: that is a page still
+    in flux (or an interstitial), so the adapter reports a *transient* failure the coordinator
+    may retry, rather than handing the policy a snapshot it can only refuse (which would start
+    the watcher's cooldown in the middle of a drop)."""
+    adapter = await start_adapter(config, Routing(checkout="blocked"))
+    try:
+        offer = await adapter.verify_offer()
+        with pytest.raises(ChallengeDetected) as info:
+            await adapter.prepare_checkout(offer)
+    finally:
+        await adapter.stop()
+    assert info.value.kind == ChallengeKind.UNKNOWN_PAGE
+    assert info.value.kind.transient
+    assert "place-order" in str(info.value)
+    assert "<n>" in str(info.value) or "checkout" in str(info.value)
 
 
 # ----------------------------------------------------------------- cart path (pre-orders)
