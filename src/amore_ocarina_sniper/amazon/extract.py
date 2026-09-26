@@ -89,7 +89,12 @@ PRODUCT_SPEC = _spec(
 CHECKOUT_SPEC = _spec(
     S.CHECKOUT_PAGE,
     count_fields=("line_items",),
-    buttons={"place_order": S.CHECKOUT_PAGE["place_order"].candidates},
+    buttons={
+        "place_order": S.CHECKOUT_PAGE["place_order"].candidates,
+        # Visibility check (not mere DOM presence): Amazon's payment widget keeps hidden
+        # inputs around on every page; only a *shown* card input means "human needed".
+        "payment_input": S.CHECKOUT_PAGE["payment_input"].candidates,
+    },
 )
 
 
@@ -224,7 +229,18 @@ def parse_checkout(raw: dict[str, Any], *, product_condition: str | None) -> Che
         payment_text=_val(raw, "payment"),
         line_item_count=line_item_count,
         place_order_available=bool(raw.get("hasVisibleButton", {}).get("place_order")),
-        raw={"url": url, "item_price_text": item_price_text, "total_text": total_text},
+        payment_input_required=bool(raw.get("hasVisibleButton", {}).get("payment_input")),
+        # Same retention as parse_offer: which selector matched and what was present is what
+        # makes an unverified review-page selector fixable after a live miss.
+        raw={
+            "url": url,
+            "item_price_text": item_price_text,
+            "total_text": total_text,
+            "fields": raw.get("fields", {}),
+            "present": raw.get("present", {}),
+            "counts": counts,
+            "hasVisibleButton": raw.get("hasVisibleButton", {}),
+        },
     )
 
 

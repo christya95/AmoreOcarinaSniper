@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 
 from amore_ocarina_sniper.models import CheckoutSnapshot, OfferSnapshot
-from amore_ocarina_sniper.policy import evaluate_checkout, evaluate_offer, seller_allowed
+from amore_ocarina_sniper.policy import evaluate_checkout, evaluate_offer, payment_matches, seller_allowed
 
 from .conftest import TARGET_ASIN, make_config
 
@@ -146,6 +146,8 @@ def test_preorder_accepted_when_allowed(tmp_path):
         ({"address_text": None}, "address"),
         ({"payment_text": "Mastercard ending in 9999"}, "payment"),
         ({"payment_text": None}, "payment"),
+        ({"payment_text": "Visa ending in 1042, expires 42/42"}, "payment"),  # 4242 not a digit group
+        ({"payment_input_required": True}, "payment requires manual input"),
         ({"place_order_available": False}, "place order"),
     ],
 )
@@ -153,6 +155,35 @@ def test_checkout_rejections(cfg, change, fragment):
     decision = evaluate_checkout(replace(good_checkout(), **change), cfg.policy, cfg.target)
     assert not decision.ok
     assert any(fragment in r for r in decision.reasons), decision.reasons
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Visa ending in 4242",
+        "Paying with Visa ending in 4242",
+        "Visa •••• 4242",
+        "Visa ****4242",
+        "Visa ...4242",
+        "Signature RBC Rewards Visa x4242",
+        "VISA\n4242\nChange",
+    ],
+)
+def test_payment_renderings_accepted(text):
+    assert payment_matches("ending in 4242", text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Visa ending in 9999", "Visa •••• 14242", "Visa 42420", "", None, "Amazon.ca Gift Card balance"],
+)
+def test_payment_renderings_rejected(text):
+    assert not payment_matches("ending in 4242", text)
+
+
+def test_payment_fragment_without_digits_is_exact_only():
+    assert payment_matches("RBC Rewards Visa", "Signature RBC Rewards Visa ending in 4242")
+    assert not payment_matches("RBC Rewards Visa", "Visa •••• 4242")
 
 
 def test_unconfigured_address_or_payment_fails_closed(tmp_path):

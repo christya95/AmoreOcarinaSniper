@@ -9,6 +9,8 @@
     over_total           total exceeds max_total
     third_party_seller   sold by a marketplace seller
     qty_two              quantity 2
+    masked_payment       card rendered as "Visa •••• 4242" (must still match "ending in 4242")
+    cvv_prompt           a visible security-code input in the payment block (must refuse)
     payment_challenge    Place order shows a payment verification prompt (no navigation)
     ambiguous            Place order navigates to a page with no confirmation
   The selectors used here are the ASSUMED checkout selectors from selectors.py; they are
@@ -68,7 +70,20 @@
     } else if (variant === 'qty_two') {
       q('#item-qty').textContent = 'Quantity: 2';
       q('#item-1').setAttribute('data-quantity', '2');
+    } else if (variant === 'masked_payment') {
+      q('#pay-line').textContent = 'Visa •••• 4242';
+    } else if (variant === 'cvv_prompt') {
+      const cvv = document.createElement('input');
+      cvv.name = 'ppw-cvv';
+      cvv.placeholder = 'Security code';
+      q('#payment-information').appendChild(cvv);
     }
+    // Amazon's payment widget keeps hidden inputs in the DOM on every layout; presence alone
+    // must never fail the attempt.
+    const hidden = document.createElement('input');
+    hidden.name = 'addCreditCardVerificationNumber';
+    hidden.style.display = 'none';
+    q('#payment-information').appendChild(hidden);
     q('input[name="placeYourOrder1"]').addEventListener('click', function (e) {
       e.preventDefault();
       if (variant === 'payment_challenge') {

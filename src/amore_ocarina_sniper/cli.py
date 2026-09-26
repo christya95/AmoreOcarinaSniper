@@ -225,6 +225,21 @@ def cmd_kill(args) -> int:
     return 0
 
 
+def cmd_notify_test(args) -> int:
+    import asyncio
+
+    from .notify import Notifier
+
+    cfg = _load(args)
+    notifier = Notifier(cfg.notify)
+    if not notifier.enabled:
+        print("[notify].ntfy_topic is empty; notifications are off.")
+        return 1
+    ok = asyncio.run(notifier.send("Ocarina test", "If you can read this on your phone, pushes work."))
+    print(f"sent to {cfg.notify.ntfy_server}/{cfg.notify.ntfy_topic}: {'ok' if ok else 'FAILED'}")
+    return 0 if ok else 1
+
+
 def cmd_status(args) -> int:
     cfg = _load(args)
     store = _store(cfg)
@@ -366,6 +381,9 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("reset", help="explicitly clear sticky states and re-enable purchasing")
     s.add_argument("--confirm", action="store_true")
     s.set_defaults(fn=cmd_reset)
+
+    s = sub.add_parser("notify-test", help="send a test push to the configured ntfy topic")
+    s.set_defaults(fn=cmd_notify_test)
 
     s = sub.add_parser("reconcile", help="open order history (read-only) to help resolve UNKNOWN")
     s.add_argument("--headless", action="store_true")

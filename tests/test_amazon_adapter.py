@@ -207,6 +207,7 @@ async def test_checkout_review_parses_and_dry_run_refuses_submit(config):
         ("wrong_payment", "payment"),
         ("unreadable_total", "total unreadable"),
         ("over_total", "exceeds max_total"),
+        ("cvv_prompt", "payment requires manual input"),
         ("third_party_seller", "seller not allowed"),
         ("qty_two", "quantity 2"),
     ],
@@ -221,6 +222,19 @@ async def test_checkout_variants_rejected(config, variant, fragment):
     decision = evaluate_checkout(snap, config.policy, config.target)
     assert not decision.ok
     assert any(fragment in r for r in decision.reasons), decision.reasons
+
+
+async def test_masked_payment_rendering_still_matches(config):
+    adapter = await start_adapter(config, Routing(checkout="masked_payment"))
+    try:
+        offer = await adapter.verify_offer()
+        snap = await adapter.prepare_checkout(offer)
+    finally:
+        await adapter.stop()
+    assert "4242" in snap.payment_text and "ending" not in snap.payment_text
+    assert not snap.payment_input_required  # the hidden widget input is ignored
+    assert snap.raw["hasVisibleButton"]["place_order"] is True
+    assert evaluate_checkout(snap, config.policy, config.target).ok
 
 
 async def test_live_submit_confirms_order_id(config):

@@ -25,12 +25,13 @@ has still not been seen live; see [What is verified](#-what-is-verified-and-what
 6. [Extension setup](#-extension-setup)
 7. [Recommended bring‑up](#-recommended-bring-up)
 8. [Running 24/7 on Windows](#-running-247-on-windows)
-9. [The state machine](#-the-state-machine)
-10. [Latency](#-latency)
-11. [Tests](#-tests)
-12. [What is verified and what is not](#-what-is-verified-and-what-is-not)
-13. [Known limitations and blockers](#-known-limitations-and-blockers)
-14. [Repository layout](#-repository-layout)
+9. [Edge cases and how they end](#-edge-cases-and-how-they-end)
+10. [The state machine](#-the-state-machine)
+11. [Latency](#-latency)
+12. [Tests](#-tests)
+13. [What is verified and what is not](#-what-is-verified-and-what-is-not)
+14. [Known limitations and blockers](#-known-limitations-and-blockers)
+15. [Repository layout](#-repository-layout)
 
 ---
 
@@ -191,7 +192,7 @@ them in deliberately.**
 | `policy.fulfillment` | `"amazon"` (Ships from Amazon) or `"any"`. If Amazon renders no *Ships from* row, Amazon‑as‑seller is accepted; other sellers fail closed. |
 | `policy.allow_preorder` | Default `false`. Accept listings that say *"This item will be released on … Pre‑order now."* Every other check still applies. |
 | `policy.approved_address_contains` | Short fragment that must appear in the shipping address (e.g. `1447 Sycamore`). |
-| `policy.approved_payment_contains` | Fragment that must appear in the payment block (e.g. `ending in 4105`). |
+| `policy.approved_payment_contains` | Fragment that must appear in the payment block (e.g. `ending in 4105`). When it ends in four digits, `Visa •••• 4105` / `****4105` renderings are accepted too; any other digits are not. |
 | `policy.default_arm_minutes` / `max_arm_minutes` | Armed‑session bounds (default 120 / 720). |
 | `target.discord_channel_id` | Optional pin: bridge rejects triggers from any other channel. |
 | `bridge.allowed_extension_origin` | Optional pin: `chrome-extension://<your extension id>`. |
@@ -200,6 +201,7 @@ them in deliberately.**
 | `watch.enabled` | Default `false`. Poll the product page yourself as a second trigger source (see *The product watcher*). |
 | `watch.interval_s` | Seconds between polls while armed (default 30, ±20 % jitter; values below 10 are refused). |
 | `watch.retrigger_cooldown_s` | After a watcher-started attempt that did not purchase, wait this long before it may trigger again (default 120). |
+| `notify.ntfy_topic` | Empty = off. A long random topic name you also subscribe to in the ntfy phone app. Pushes on ORDER PLACED, stock‑seen‑but‑REFUSED, NEEDS_ATTENTION/UNKNOWN, first watch‑tab challenge, runner start. |
 | `telemetry.verbose` | Mirror every telemetry event into the console log. Diagnostic only. |
 
 💡 Keep the address and card fragments **short**. Amazon may render "Sycamore Garden" as
@@ -225,6 +227,7 @@ ocarina trigger               # 🧪 synthetic alert through the real bridge
 ocarina trigger --stale-seconds 600         # 🧪 demonstrates freshness rejection (HTTP 410)
 ocarina reset --confirm       # ♻️ leave PURCHASED / UNKNOWN / NEEDS_ATTENTION, re‑enable
 ocarina reconcile             # 🔎 read‑only look at order history to resolve UNKNOWN
+ocarina notify-test           # 📱 send a test push to your phone (ntfy)
 ```
 
 `ocarina` is a console script; `python -m amore_ocarina_sniper …` is equivalent. Use `--config`
@@ -319,6 +322,28 @@ popup makes such drops visible.
 
 ---
 
+## 🧯 Edge cases and how they end
+
+Everything below is **fail‑closed**: the worst outcome is a *missed* purchase, never a wrong
+one. The table says what the robot does and what *you* can do beforehand so the miss does not
+happen.
+
+| Situation | What the robot does | What you should do beforehand |
+| --- | --- | --- |
+| Other items already in your Amazon cart | **Buy Now** checks out only this item, so the cart is irrelevant. The **cart fallback** (only if Buy Now is missing) would show 2+ line items → refused. | Keep the cart **empty**. Cart is account‑wide; you can empty it from your phone. |
+| A refused *cart‑path* attempt left the console in the cart | Next cart attempt shows quantity 2 → refused. The runner log warns `abandon: the cart path was used…`. | Empty the cart before the next drop. |
+| Review page shows a different address or card | Refused (`shipping address does not match` / `payment method does not match`). The robot never changes selections. | In Amazon → *Your Addresses* set **1447 Sycamore** as default; *Your Payments → Wallet* set the **Visa ending 4105** as default. Buy Now uses the defaults. |
+| Card rendered as `Visa •••• 4105` instead of `ending in 4105` | Accepted: a fragment ending in four digits also matches masked renderings of those exact digits. | Nothing. |
+| Amazon asks to re‑enter the security code (CVV) | A *visible* card input on the review page is refused **before** the click (`payment requires manual input`) with screenshot + HTML, instead of ending in `UNKNOWN` after it. The robot never types card data. | Use the card on Amazon once shortly before the drop (any small order) so it is “recently verified”. |
+| Amazon asks for your password at checkout | `login_required` → `NEEDS_ATTENTION`, push to your phone. | Keep the browser window reachable (RDP/Tailscale) and sign in by hand; then `ocarina reset --confirm` and re‑arm. |
+| CAPTCHA on the watch tab | Watcher backs off, one push. Discord path unaffected. | Solve it in the browser window. |
+| You are also watching with a phone stock app (HotStock etc.) | The robot cannot see your manual orders. Two orders are possible if you both buy in the same minute. | **Rule: robot first.** When your phone alerts, wait for the push: *ORDER PLACED* → do nothing; *REFUSED — buy manually* → go; no push within ~10 s → check `ocarina status`, then go manual. If you do buy manually, run `ocarina kill` immediately. |
+| Pre‑order button reads “Pre‑order now” | Same `#buy-now-button` / `#add-to-cart-button` ids; handled. Price/seller/condition still verified. | Keep `policy.allow_preorder = true`. |
+| Product page shows a variant/edition picker | Refused (`variant selector present`). | Nothing; the alert‑matched ASIN is a single edition. |
+| Review‑page selectors are wrong (never live‑verified) | `checkout surface did not appear` or unreadable fields → refused/`NEEDS_ATTENTION` with screenshot + all‑frame HTML in `runtime/artifacts/`. | Send the artifacts here; fixing a selector takes minutes. |
+
+---
+
 ## 🔁 The state machine
 
 ```mermaid
@@ -380,7 +405,7 @@ someone else's alert bot for the first signal.
 ## 🧪 Tests
 
 ```powershell
-python -m pytest -q          # 185 tests, ~75 s (headless Chromium for fixture‑driven tests)
+python -m pytest -q          # 209 tests, ~80 s (headless Chromium for fixture‑driven tests)
 ruff check src tests
 ```
 
@@ -418,6 +443,7 @@ order can be placed. Coverage highlights:
 | *Ships from* row on an Amazon‑sold pre‑order | ✅ observed **absent** | Fulfillment is now inferred from Amazon‑as‑seller in that case. |
 | Pre‑order availability text | ✅ live 2026‑09‑25 | *"This item will be released on October 29, 2026. Pre‑order now."* |
 | Checkout review page (`CHECKOUT_PAGE` selectors), turbo‑checkout iframe, confirmation markers, order‑id pattern | ⚠️ **assumed** | Fail‑closed. Never seen live. On refusal the runner saves a full‑page screenshot + all‑frame HTML to `runtime/artifacts/` and the full field dump to telemetry. |
+| Review‑page CVV / card‑input prompt (`payment_input`) | ⚠️ assumed | Visibility‑checked only, so a wrong guess can never block a normal checkout; it can only miss a prompt (which then ends in `UNKNOWN` as before). |
 | Order‑history layout (`reconcile`), MFA selectors | ⚠️ assumed | |
 | Does *Buy Now* show every policy field on this listing? | ❓ unknown | If not, `checkout.strategy = "cart"`. Unrelated cart items then fail closed by design. |
 
@@ -458,6 +484,7 @@ src/amore_ocarina_sniper/
   config.py  policy.py  models.py store.py  lock.py  killswitch.py
   telemetry.py  bridge.py  coordinator.py  app.py  cli.py
   watch.py                        optional product-page poller (second trigger source)
+  notify.py                       optional ntfy push to the operator's phone (off critical path)
   amazon/selectors.py             Amazon selectors with VERIFIED / ASSUMED status
   amazon/extract.py               one‑round‑trip DOM extractor + fail‑closed parsers
   amazon/adapter.py               Playwright flow: product → checkout → confirm; evidence capture

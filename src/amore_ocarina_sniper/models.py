@@ -87,6 +87,10 @@ class CheckoutSnapshot:
     line_item_count: int | None
     place_order_available: bool
     raw: dict[str, Any] = field(default_factory=dict)
+    # A *visible* security-code / card-number input on the review page: Amazon wants a human
+    # to re-enter card details. We never store or type those, so this fails closed before
+    # the click instead of after it.
+    payment_input_required: bool = False
 
 
 @dataclass

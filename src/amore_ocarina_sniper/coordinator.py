@@ -22,6 +22,7 @@ from .models import (
     PurchaseState,
     TriggerEvent,
 )
+from .notify import PRIORITY_HIGH, PRIORITY_URGENT, Notifier
 from .policy import evaluate_checkout, evaluate_offer
 from .store import StateStore, now_ms
 from .telemetry import Telemetry, Timeline
@@ -41,6 +42,7 @@ class PurchaseCoordinator:
         telemetry: Telemetry,
         dry_run: bool,
         kill_switch_path: Path | None = None,
+        notifier: Notifier | None = None,
     ) -> None:
         import asyncio
 
@@ -48,10 +50,12 @@ class PurchaseCoordinator:
         self.store = store
         self.adapter = adapter
         self.telemetry = telemetry
+        self.notifier = notifier or Notifier(config.notify)
         self.dry_run = dry_run
         self.kill_switch_path = kill_switch_path or config.paths.kill_switch_path
         self._lock = asyncio.Lock()
         self._consecutive_failures = 0
+        self._offer_was_present = False  # set per attempt; drives the "go manual" push
         self.last_outcome: AttemptOutcome | None = None
 
     # ---------------------------------------------------------------- status
@@ -67,6 +71,7 @@ class PurchaseCoordinator:
             "dry_run": self.dry_run,
             "kill_switch": killswitch.is_engaged(self.kill_switch_path),
             "busy": self._lock.locked(),
+            "notify": self.notifier.enabled,
             "last_outcome": (
                 {
                     "event_id": self.last_outcome.event_id,
@@ -108,7 +113,36 @@ class PurchaseCoordinator:
             tl, final_state=outcome.final_state.value, reason=outcome.reason, dry_run=outcome.dry_run
         )
         log.info("attempt %s -> %s (%s)", event.event_id, outcome.final_state.value, outcome.reason)
+        self._notify_outcome(event, outcome)
         return outcome
+
+    def _notify_outcome(self, event: TriggerEvent, outcome: AttemptOutcome) -> None:
+        """Push to the operator's phone. After the attempt; never influences it."""
+        state = outcome.final_state
+        src = event.source
+        if state == PurchaseState.PURCHASED:
+            self.notifier.fire(
+                "ORDER PLACED — do NOT buy manually",
+                f"Order {outcome.order_id} confirmed (trigger: {src}). Bot purchasing is now disabled.",
+                priority=PRIORITY_URGENT,
+                tags="white_check_mark",
+            )
+        elif state in (PurchaseState.UNKNOWN, PurchaseState.NEEDS_ATTENTION):
+            self.notifier.fire(
+                f"Bot {state.value}: check the browser window",
+                f"{outcome.reason} (trigger: {src}). Nothing more will be attempted until you look.",
+                priority=PRIORITY_URGENT,
+                tags="warning",
+            )
+        elif self._offer_was_present and not outcome.order_id and not outcome.dry_run:
+            # Stock was there and we refused: the drop is live and the bot is out. Go manual.
+            self.notifier.fire(
+                "Stock seen but bot REFUSED — buy manually now",
+                f"{outcome.reason} (trigger: {src})",
+                priority=PRIORITY_HIGH,
+                tags="rotating_light",
+            )
+        self._offer_was_present = False
 
     def _skip(self, event: TriggerEvent, reason: str, tl: Timeline) -> AttemptOutcome:
         self.store.set_event_disposition(event.event_id, f"skipped: {reason}")
@@ -135,11 +169,12 @@ class PurchaseCoordinator:
                 is_preorder=offer.is_preorder,
                 offer=asdict(offer),
             )
+            offer_present = (
+                offer.in_stock or offer.is_preorder or offer.price is not None
+                or offer.buy_now_available or offer.add_to_cart_available
+            )
+            self._offer_was_present = offer_present
             if not decision.ok:
-                offer_present = (
-                    offer.in_stock or offer.is_preorder or offer.price is not None
-                    or offer.buy_now_available or offer.add_to_cart_available
-                )
                 if offer_present:
                     # The interesting case: there WAS an offer and we still refused. Keep the
                     # evidence (off the critical path; the attempt is already over).

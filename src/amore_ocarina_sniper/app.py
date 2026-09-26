@@ -14,6 +14,7 @@ from .config import AppConfig
 from .coordinator import PurchaseCoordinator
 from .lock import ProcessLock
 from .models import PurchaseState
+from .notify import Notifier
 from .store import StateStore, now_ms
 from .telemetry import Telemetry
 from .watch import ProductWatcher
@@ -58,8 +59,14 @@ async def run_forever(config: AppConfig, *, dry_run: bool, headless: bool) -> in
         except Exception as exc:  # noqa: BLE001 - readiness is best effort at startup
             log.warning("product tab not ready at startup: %s", exc)
 
+        notifier = Notifier(config.notify)
         coordinator = PurchaseCoordinator(
-            config=config, store=store, adapter=adapter, telemetry=telemetry, dry_run=dry_run
+            config=config,
+            store=store,
+            adapter=adapter,
+            telemetry=telemetry,
+            dry_run=dry_run,
+            notifier=notifier,
         )
         bridge = TriggerBridge(
             bridge_cfg=config.bridge,
@@ -85,14 +92,20 @@ async def run_forever(config: AppConfig, *, dry_run: bool, headless: bool) -> in
                 telemetry=telemetry,
                 on_trigger=coordinator.handle_trigger,
                 is_busy=lambda: coordinator.status()["busy"],
+                notifier=notifier,
             )
             tasks.append(asyncio.create_task(product_watcher.run(stop)))
         log.info(
-            "ready. state=%s dry_run=%s bridge=127.0.0.1:%d watch=%s — arm with `ocarina arm`",
+            "ready. state=%s dry_run=%s bridge=127.0.0.1:%d watch=%s notify=%s — arm with `ocarina arm`",
             store.get_control().state.value,
             dry_run,
             config.bridge.port,
             f"every {config.watch.interval_s}s" if config.watch.enabled else "off",
+            "ntfy" if notifier.enabled else "off",
+        )
+        notifier.fire(
+            f"Ocarina runner started ({'LIVE' if not dry_run else 'dry-run'})",
+            f"State {store.get_control().state.value}. Arm with `ocarina arm` if this was a restart.",
         )
         try:
             if sys.platform == "win32":
@@ -114,5 +127,6 @@ async def run_forever(config: AppConfig, *, dry_run: bool, headless: bool) -> in
                     await task
             await bridge.stop()
             await adapter.stop()
+            await notifier.close()
             store.close()
     return 0

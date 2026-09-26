@@ -67,6 +67,7 @@ class AmazonAdapter:
         self._watch_page = None  # second tab used only by the product watcher
         self._checkout_target = None  # Page or Frame holding the checkout UI
         self._last_offer_condition: str | None = None
+        self._used_cart_path = False
 
     # ------------------------------------------------------------ lifecycle
     async def start(self) -> None:
@@ -192,9 +193,11 @@ class AmazonAdapter:
     async def prepare_checkout(self, offer: OfferSnapshot) -> CheckoutSnapshot:
         cfg = self.config
         strategy = cfg.checkout.strategy
+        self._used_cart_path = False
         if strategy == "buy_now" and offer.buy_now_available:
             await self._click_first(self.page, S.PRODUCT_PAGE["buy_now"].candidates)
         elif offer.add_to_cart_available:
+            self._used_cart_path = True
             await self._click_first(self.page, S.PRODUCT_PAGE["add_to_cart"].candidates)
             await self.page.goto("https://www.amazon.ca/gp/cart/view.html", wait_until="domcontentloaded")
             await self._click_first(
@@ -291,6 +294,12 @@ class AmazonAdapter:
     async def abandon(self) -> None:
         """Leave any unsubmitted checkout and return to the product tab. Never touches cart."""
         self._checkout_target = None
+        if self._used_cart_path:
+            self._used_cart_path = False
+            log.warning(
+                "abandon: the cart path was used; the item most likely remains in your Amazon cart. "
+                "Empty the cart before the next attempt or a cart checkout will show quantity 2."
+            )
         try:
             await self.page.goto(self.config.target.url, wait_until="domcontentloaded")
         except Exception as exc:  # pragma: no cover

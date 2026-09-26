@@ -85,6 +85,15 @@ interval_s = 30
 # watcher may trigger again (the Discord path is unaffected).
 retrigger_cooldown_s = 120
 
+[notify]
+# Optional push notifications to your phone via ntfy (https://ntfy.sh, free, no account):
+# install the ntfy app, subscribe to a long random topic name, put the same name here, then
+# run `ocarina notify-test`. Sent after an attempt ends (never during): ORDER PLACED,
+# stock seen but REFUSED (go manual), NEEDS_ATTENTION / UNKNOWN, first Amazon challenge on
+# the watch tab, runner (re)started. Messages carry state + policy reasons only.
+ntfy_topic = ""
+ntfy_server = "https://ntfy.sh"
+
 [telemetry]
 # JSON-lines telemetry under data_dir/logs
 enabled = true

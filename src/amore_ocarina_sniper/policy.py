@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from .config import PurchasePolicy, TargetConfig
 from .matching import normalize_text
 from .models import CheckoutSnapshot, OfferSnapshot, PolicyDecision
@@ -45,6 +47,32 @@ def fulfiller_ok(fulfiller: str | None, requirement: str, *, seller: str | None 
     f = normalize_text(fulfiller)
     f = f.removeprefix("ships from").strip()
     return f in AMAZON_FULFILLER_ALIASES or f.replace(" ", "") in {"amazon", "amazonca"}
+
+
+_LAST4_RE = re.compile(r"(\d{4})\s*$")
+
+
+def payment_matches(approved_fragment: str, payment_text: str | None) -> bool:
+    """True when the review page's payment block shows the approved card.
+
+    Exact normalized substring first. Amazon renders the same card as "Visa ending in 4105",
+    "Visa •••• 4105" or "Visa ****4105" depending on the checkout layout, so when the
+    configured fragment ends in four digits we also accept those four digits appearing as a
+    standalone digit group in the payment block. Other digits (expiry, another card's last
+    four) cannot satisfy that. Missing text still fails closed.
+    """
+    if not payment_text:
+        return False
+    needle = normalize_text(approved_fragment)
+    hay = normalize_text(payment_text)
+    if not needle:
+        return False
+    if needle in hay:
+        return True
+    m = _LAST4_RE.search(needle)
+    if not m:
+        return False
+    return re.search(rf"(?<!\d){m.group(1)}(?!\d)", hay) is not None
 
 
 def title_matches_target(title: str | None, target: TargetConfig) -> bool:
@@ -130,11 +158,12 @@ def evaluate_checkout(snap: CheckoutSnapshot, policy: PurchasePolicy, target: Ta
         reasons.append("approved_address_contains not configured")
     elif not snap.address_text or addr_needle not in normalize_text(snap.address_text):
         reasons.append("shipping address does not match approved address")
-    pay_needle = normalize_text(policy.approved_payment_contains)
-    if not pay_needle:
+    if not normalize_text(policy.approved_payment_contains):
         reasons.append("approved_payment_contains not configured")
-    elif not snap.payment_text or pay_needle not in normalize_text(snap.payment_text):
+    elif not payment_matches(policy.approved_payment_contains, snap.payment_text):
         reasons.append("payment method does not match approved payment")
+    if snap.payment_input_required:
+        reasons.append("payment requires manual input (security code / card re-entry visible)")
     if not snap.place_order_available:
         reasons.append("place order control not available")
     return PolicyDecision(ok=not reasons, reasons=reasons)

@@ -16,7 +16,7 @@ Layout:
 - `extension/` — unpacked MV3 extension (`content/observer.js`, `content/selectors.js`,
   `shared/matcher.js`, `background.js`, popup, options).
 - `src/amore_ocarina_sniper/` — `config`, `policy`, `models`, `store`, `lock`, `killswitch`,
-  `telemetry`, `bridge`, `coordinator`, `watch`, `app`, `cli`; `amazon/` holds `selectors.py`,
+  `telemetry`, `bridge`, `coordinator`, `watch`, `notify`, `app`, `cli`; `amazon/` holds `selectors.py`,
   `extract.py`, `adapter.py`.
 - `tests/` — pytest suite; fixtures in `tests/fixtures/{discord,amazon}/`.
 - `config.example.toml` — the only config that is committed.
@@ -186,7 +186,24 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
   (`enabled`, `interval_s` ≥ 10, `retrigger_cooldown_s`). 185 tests.
 - Enabled in the host `config.toml`; runner restarted LIVE with the watcher on.
 
+### Edge-case pass — 2026-09-25 evening
+- Operator asked for pre-emptive fixes (2+ cart items, manual buying via HotStock in parallel,
+  correct card/address, instant pre-order). Shipped: `policy.payment_matches` accepts masked
+  card renderings (`•••• 4105`) for a fragment ending in 4 digits; `CheckoutSnapshot.
+  payment_input_required` (visible CVV / card input → refused pre-intent instead of UNKNOWN
+  post-click); checkout `raw` retains fields/present/counts/buttons like the offer does;
+  adapter warns when the cart path was abandoned (item stays in cart); `notify.py` (ntfy push
+  on PURCHASED / REFUSED-with-stock / NEEDS_ATTENTION / UNKNOWN / first watch challenge /
+  runner start) + `ocarina notify-test`; README *Edge cases* table with the operator checklist.
+  209 tests.
+- Operator checklist (README → Edge cases): empty cart, Amazon default address = 1447 Sycamore,
+  default payment = Visa 4105, one small recent purchase with that card, install ntfy app and
+  subscribe to the topic in `config.toml`, "robot first" rule for HotStock alerts.
+
 ### Next up
+- [ ] Operator: install ntfy on iPhone, subscribe to the `[notify].ntfy_topic` in `config.toml`,
+  run `ocarina notify-test`, confirm the push arrives.
+- [ ] Operator: verify Amazon default address / default payment card; empty the cart.
 - [ ] After the first `watch_trigger` / `watch_challenge` in `telemetry.jsonl`: confirm Amazon
   tolerates the 30 s cadence on a signed-in session (no CAPTCHA); otherwise raise the interval.
 - [ ] Scheduled Task: `ocarina run --live` at logon (runner still comes up DISARMED by design).

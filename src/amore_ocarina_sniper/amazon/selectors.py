@@ -214,6 +214,20 @@ CHECKOUT_PAGE: dict[str, Field] = {
         ),
         "ASSUMED",
     ),
+    "payment_input": Field(
+        "payment_input",
+        (
+            "input[name*='cvv' i]",
+            "input[id*='cvv' i]",
+            "input[name*='securitycode' i]",
+            "input[placeholder*='security code' i]",
+            "input[aria-label*='security code' i]",
+            "input[name*='addCreditCardNumber' i]",
+            "input[placeholder*='card number' i]",
+        ),
+        "ASSUMED",
+        note="checked for *visibility* only; a hidden widget input never fails the attempt",
+    ),
     "place_order": Field(
         "place_order",
         (

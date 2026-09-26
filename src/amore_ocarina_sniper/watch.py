@@ -23,6 +23,7 @@ from collections.abc import Awaitable, Callable
 from .amazon.adapter import PurchaseAdapter
 from .config import AppConfig
 from .models import AttemptOutcome, ChallengeDetected, OfferSnapshot, PurchaseState, TriggerEvent
+from .notify import PRIORITY_HIGH, Notifier
 from .policy import evaluate_offer
 from .store import StateStore, now_ms
 from .telemetry import Telemetry
@@ -59,6 +60,7 @@ class ProductWatcher:
         telemetry: Telemetry,
         on_trigger: Callable[[TriggerEvent], Awaitable[AttemptOutcome]],
         is_busy: Callable[[], bool],
+        notifier: Notifier | None = None,
     ) -> None:
         self.config = config
         self.store = store
@@ -66,6 +68,7 @@ class ProductWatcher:
         self.telemetry = telemetry
         self.on_trigger = on_trigger
         self.is_busy = is_busy
+        self.notifier = notifier
         self._failures = 0
         self._last_signature: tuple | None = None
         self._cooldown_until = 0.0
@@ -106,6 +109,13 @@ class ProductWatcher:
             self._failures += 1
             log.warning("watch: challenge on product page (%s); backing off", exc)
             self.telemetry.emit("watch_challenge", challenge=exc.kind.value, failures=self._failures)
+            if self._failures == 1 and self.notifier is not None:
+                self.notifier.fire(
+                    f"Amazon challenge on the watch tab: {exc.kind.value}",
+                    "Polling is backing off. Solve it in the browser window; the Discord path is unaffected.",
+                    priority=PRIORITY_HIGH,
+                    tags="warning",
+                )
             return False
         except Exception as exc:  # noqa: BLE001 - the watcher must never die
             self._failures += 1

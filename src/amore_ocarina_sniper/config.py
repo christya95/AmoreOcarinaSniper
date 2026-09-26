@@ -7,6 +7,7 @@ policy fields raise ``ConfigError`` at load time so `run`/`arm` refuse to start.
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -144,6 +145,15 @@ class WatchConfig:
 
 
 @dataclass(frozen=True)
+class NotifyConfig:
+    """Optional push notifications to the operator's phone via ntfy. Empty topic = off."""
+
+    ntfy_topic: str = ""
+    ntfy_server: str = "https://ntfy.sh"
+    timeout_s: int = 5
+
+
+@dataclass(frozen=True)
 class AppConfig:
     paths: PathsConfig
     bridge: BridgeConfig
@@ -152,6 +162,7 @@ class AppConfig:
     checkout: CheckoutConfig = field(default_factory=CheckoutConfig)
     telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
     watch: WatchConfig = field(default_factory=WatchConfig)
+    notify: NotifyConfig = field(default_factory=NotifyConfig)
     source_path: Path | None = None
 
 
@@ -200,6 +211,7 @@ def load_config_dict(raw: dict, base_dir: Path, source_path: Path | None = None)
     checkout_raw = raw.get("checkout", {}) or {}
     telemetry_raw = raw.get("telemetry", {}) or {}
     watch_raw = raw.get("watch", {}) or {}
+    notify_raw = raw.get("notify", {}) or {}
 
     def resolve(p: str) -> Path:
         path = Path(p)
@@ -312,6 +324,15 @@ def load_config_dict(raw: dict, base_dir: Path, source_path: Path | None = None)
         raise ConfigError(f"[watch].interval_s must be >= {WATCH_MIN_INTERVAL_S} (no aggressive polling)")
     if watch.retrigger_cooldown_s < 0:
         raise ConfigError("[watch].retrigger_cooldown_s must be >= 0")
+    notify = NotifyConfig(
+        ntfy_topic=_opt(notify_raw, "notify", "ntfy_topic", str, "").strip(),
+        ntfy_server=_opt(notify_raw, "notify", "ntfy_server", str, "https://ntfy.sh").strip(),
+        timeout_s=_opt(notify_raw, "notify", "timeout_s", int, 5),
+    )
+    if notify.ntfy_topic and not notify.ntfy_server.startswith("https://"):
+        raise ConfigError("[notify].ntfy_server must be an https:// URL")
+    if notify.ntfy_topic and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", notify.ntfy_topic):
+        raise ConfigError("[notify].ntfy_topic may only contain letters, digits, '-' and '_'")
     return AppConfig(
         paths=paths,
         bridge=bridge,
@@ -320,6 +341,7 @@ def load_config_dict(raw: dict, base_dir: Path, source_path: Path | None = None)
         checkout=checkout,
         telemetry=telemetry,
         watch=watch,
+        notify=notify,
         source_path=source_path,
     )
 
