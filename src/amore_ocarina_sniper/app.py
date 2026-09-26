@@ -16,6 +16,7 @@ from .lock import ProcessLock
 from .models import PurchaseState
 from .store import StateStore, now_ms
 from .telemetry import Telemetry
+from .watch import ProductWatcher
 
 log = logging.getLogger("ocarina.app")
 
@@ -75,12 +76,23 @@ async def run_forever(config: AppConfig, *, dry_run: bool, headless: bool) -> in
         if sys.platform != "win32":
             for sig in (signal.SIGINT, signal.SIGTERM):
                 loop.add_signal_handler(sig, stop.set)
-        watcher = asyncio.create_task(_expiry_watch(store, stop))
+        tasks = [asyncio.create_task(_expiry_watch(store, stop))]
+        if config.watch.enabled:
+            product_watcher = ProductWatcher(
+                config=config,
+                store=store,
+                adapter=adapter,
+                telemetry=telemetry,
+                on_trigger=coordinator.handle_trigger,
+                is_busy=lambda: coordinator.status()["busy"],
+            )
+            tasks.append(asyncio.create_task(product_watcher.run(stop)))
         log.info(
-            "ready. state=%s dry_run=%s bridge=127.0.0.1:%d — arm with `ocarina arm`",
+            "ready. state=%s dry_run=%s bridge=127.0.0.1:%d watch=%s — arm with `ocarina arm`",
             store.get_control().state.value,
             dry_run,
             config.bridge.port,
+            f"every {config.watch.interval_s}s" if config.watch.enabled else "off",
         )
         try:
             if sys.platform == "win32":
@@ -95,9 +107,11 @@ async def run_forever(config: AppConfig, *, dry_run: bool, headless: bool) -> in
             pass
         finally:
             stop.set()
-            watcher.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await watcher
+            for task in tasks:
+                task.cancel()
+            for task in tasks:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
             await bridge.stop()
             await adapter.stop()
             store.close()

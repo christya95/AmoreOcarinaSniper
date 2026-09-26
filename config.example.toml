@@ -69,8 +69,21 @@ strategy = "buy_now"
 navigation_timeout_ms = 15000
 element_timeout_ms = 8000
 confirmation_timeout_ms = 20000
-# Optional resource blocking (images/fonts/media). Benchmark before relying on it.
+# Optional resource blocking (images/fonts/media). Benchmarked 2026-09-25: no measurable gain
+# because verification already stops at DOMContentLoaded. Leave off.
 block_heavy_assets = false
+
+[watch]
+# Second trigger source: while ARMED, Python re-reads the product page itself on a second
+# tab every `interval_s` seconds (±20 % jitter) and starts the normal verified checkout
+# when the page shows an offer the policy would accept. Closes the gap between Amazon
+# flipping the listing and the Discord alert being posted. Costs 2–3 signed-in requests a
+# minute; interval_s below 10 is refused. Off by default.
+enabled = false
+interval_s = 30
+# After a watcher-triggered attempt that did not purchase, wait this long before the
+# watcher may trigger again (the Discord path is unaffected).
+retrigger_cooldown_s = 120
 
 [telemetry]
 # JSON-lines telemetry under data_dir/logs

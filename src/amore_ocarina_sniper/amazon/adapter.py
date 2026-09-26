@@ -38,6 +38,7 @@ class PurchaseAdapter(Protocol):
 
     async def ensure_ready(self) -> None: ...
     async def verify_offer(self) -> OfferSnapshot: ...
+    async def poll_offer(self) -> OfferSnapshot: ...
     async def prepare_checkout(self, offer: OfferSnapshot) -> CheckoutSnapshot: ...
     async def submit_order(self) -> None: ...
     async def confirm_order(self) -> str | None: ...
@@ -63,6 +64,7 @@ class AmazonAdapter:
         self._pw = None
         self._context = None
         self._page = None
+        self._watch_page = None  # second tab used only by the product watcher
         self._checkout_target = None  # Page or Frame holding the checkout UI
         self._last_offer_condition: str | None = None
 
@@ -98,6 +100,7 @@ class AmazonAdapter:
             self._context = None
             self._pw = None
             self._page = None
+            self._watch_page = None
 
     @property
     def page(self):
@@ -149,9 +152,22 @@ class AmazonAdapter:
         if self.page.url != self.config.target.url:
             await self.page.goto(self.config.target.url, wait_until="domcontentloaded")
 
-    async def verify_offer(self) -> OfferSnapshot:
+    async def poll_offer(self) -> OfferSnapshot:
+        """Read the product page on a dedicated second tab (same signed-in session).
+
+        Used by the watcher only. Keeping it off the main tab means a Discord trigger can
+        start ``verify_offer`` at any moment without racing a poll's navigation.
+        """
+        if self._watch_page is None or self._watch_page.is_closed():
+            if self._context is None:
+                raise RuntimeError("adapter not started")
+            self._watch_page = await self._context.new_page()
+        return await self.verify_offer(page=self._watch_page)
+
+    async def verify_offer(self, page=None) -> OfferSnapshot:
         cfg = self.config
-        await self.page.goto(cfg.target.url, wait_until="domcontentloaded")
+        page = page or self.page
+        await page.goto(cfg.target.url, wait_until="domcontentloaded")
         readiness = ", ".join(
             [
                 *S.PRODUCT_PAGE["asin"].candidates,
@@ -161,16 +177,15 @@ class AmazonAdapter:
             ]
         )
         try:
-            await self.page.wait_for_selector(
-                readiness, state="attached", timeout=cfg.checkout.element_timeout_ms
-            )
+            await page.wait_for_selector(readiness, state="attached", timeout=cfg.checkout.element_timeout_ms)
         except Exception as exc:
-            await self._raise_if_challenge(self.page)
+            await self._raise_if_challenge(page)
             raise ChallengeDetected(ChallengeKind.UNKNOWN_PAGE, "product page did not render") from exc
-        await self._raise_if_challenge(self.page)
-        raw = await self._extract(self.page, PRODUCT_SPEC)
+        await self._raise_if_challenge(page)
+        raw = await self._extract(page, PRODUCT_SPEC)
         offer = parse_offer(raw)
-        self._last_offer_condition = offer.condition
+        if page is self._page:
+            self._last_offer_condition = offer.condition
         return offer
 
     # ------------------------------------------------------------- checkout

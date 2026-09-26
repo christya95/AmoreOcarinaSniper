@@ -28,6 +28,8 @@ class FakeAdapter:
         self.fail_prepare: Exception | None = None
         self.fail_submit: Exception | None = None
         self.fail_confirm: Exception | None = None
+        self.fail_poll: Exception | None = None
+        self.poll_result = None  # watcher sees this; None = same as self.offer
         self.calls: list[str] = []
         self.submit_delay = 0.0
         self.on_submit = None
@@ -40,6 +42,12 @@ class FakeAdapter:
         if self.fail_verify:
             raise self.fail_verify
         return self.offer
+
+    async def poll_offer(self):
+        self.calls.append("poll_offer")
+        if self.fail_poll:
+            raise self.fail_poll
+        return self.poll_result if self.poll_result is not None else self.offer
 
     async def prepare_checkout(self, offer):
         self.calls.append("prepare_checkout")

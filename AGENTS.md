@@ -16,7 +16,7 @@ Layout:
 - `extension/` — unpacked MV3 extension (`content/observer.js`, `content/selectors.js`,
   `shared/matcher.js`, `background.js`, popup, options).
 - `src/amore_ocarina_sniper/` — `config`, `policy`, `models`, `store`, `lock`, `killswitch`,
-  `telemetry`, `bridge`, `coordinator`, `app`, `cli`; `amazon/` holds `selectors.py`,
+  `telemetry`, `bridge`, `coordinator`, `watch`, `app`, `cli`; `amazon/` holds `selectors.py`,
   `extract.py`, `adapter.py`.
 - `tests/` — pytest suite; fixtures in `tests/fixtures/{discord,amazon}/`.
 - `config.example.toml` — the only config that is committed.
@@ -36,6 +36,11 @@ Layout:
 10. **Selectors live in one place each** (`extension/content/selectors.js`,
     `src/amore_ocarina_sniper/amazon/selectors.py`) and carry a verified/assumed status.
 11. The bridge binds `127.0.0.1` only; no wildcard CORS; no exposed debugging ports.
+12. **No aggressive polling.** The product watcher (`watch.py`) is the only self-initiated
+    Amazon traffic: one page load per `watch.interval_s` (≥ 10 s, enforced at config load),
+    only while ARMED, never while an attempt is in flight, exponential back-off on any
+    challenge. It triggers the *same* coordinator path as a Discord alert and cannot bypass
+    policy, arming, or the single-purchase rule.
 
 ## Commands
 
@@ -172,7 +177,18 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
 - Follow-ups: operator to pause Windows Update + set active hours; Scheduled Task at logon
   (M3) is now a priority; auto sign-in after restart so the task fires.
 
+### Speed review — 2026-09-25 evening
+- Our side of the critical path is a few hundred ms; the rest is Amazon serving pages.
+  `block_heavy_assets` benchmarked: no gain (M5). Checkout loop already polls at 50 ms.
+- **Operator approved a second trigger source** (2026-09-25): `watch.py` polls the product
+  page on a second tab every 30 s while ARMED and feeds `coordinator.handle_trigger` a
+  synthetic `watch-<ms>` event when `evaluate_offer` would pass. Config `[watch]`
+  (`enabled`, `interval_s` ≥ 10, `retrigger_cooldown_s`). 185 tests.
+- Enabled in the host `config.toml`; runner restarted LIVE with the watcher on.
+
 ### Next up
+- [ ] After the first `watch_trigger` / `watch_challenge` in `telemetry.jsonl`: confirm Amazon
+  tolerates the 30 s cadence on a signed-in session (no CAPTCHA); otherwise raise the interval.
 - [ ] Scheduled Task: `ocarina run --live` at logon (runner still comes up DISARMED by design).
 - [ ] Operator: pause Windows Update (Settings → Windows Update → Pause), set active hours.
 - [x] Operator approved pre-orders 2026-09-25 04:20: `allow_preorder = true`, runner
@@ -204,6 +220,11 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
 
 ## Decision log
 
+- 2026-09-25 — **Self-polling enabled (30 s)**, operator's call after the speed review. The
+  spec's "avoid aggressive polling" is honoured by a hard ≥ 10 s floor, jitter, armed-only
+  operation, back-off on challenges and a re-trigger cooldown. Rationale: the Discord alert
+  is someone else's bot; the 03:52 event showed the whole window is < 3 min, so seconds of
+  head start matter more than any local optimisation. Revert with `watch.enabled = false`.
 - 2026-09-24 23:15 — **Live before checkout probe**, operator's call. Rationale: item is
   *Currently unavailable*; the first restock is the only chance to observe the real review page,
   and fail-closed policy checks make a wrong purchase far less likely than a missed one. Added

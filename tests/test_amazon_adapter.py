@@ -79,6 +79,22 @@ async def test_offer_in_stock_parses_verified_fields(config):
     assert all(urlparse(u).hostname == "www.amazon.ca" for u in routing.requests)
 
 
+async def test_poll_offer_uses_a_separate_tab(config):
+    adapter = await start_adapter(config, Routing())
+    try:
+        offer = await adapter.poll_offer()
+        assert offer.asin == "B0HJ6F8L6V" and offer.in_stock
+        assert adapter._watch_page is not None and adapter._watch_page is not adapter.page
+        assert adapter.page.url == "about:blank"  # main tab never navigated by a poll
+        assert adapter._watch_page.url == config.target.url
+        # Polling must not leak state that the checkout path reads from the main tab.
+        assert adapter._last_offer_condition is None
+        again = await adapter.poll_offer()
+        assert again.asin == offer.asin and len(adapter._context.pages) == 2
+    finally:
+        await adapter.stop()
+
+
 async def test_offer_unavailable_fails_closed(config):
     adapter = await start_adapter(config, Routing(product="product_unavailable.html"))
     try:

@@ -71,6 +71,19 @@ def test_invalid_configs_rejected(tmp_path, mutate, fragment):
     assert fragment.lower() in str(exc.value).lower()
 
 
+def test_watch_defaults_off_and_refuses_aggressive_interval(tmp_path):
+    raw = _example()
+    cfg = load_config_dict(raw, base_dir=tmp_path)
+    assert cfg.watch.enabled is False and cfg.watch.interval_s == 30
+    raw["watch"] = {"enabled": True, "interval_s": 30, "retrigger_cooldown_s": 60}
+    cfg = load_config_dict(raw, base_dir=tmp_path)
+    assert cfg.watch.enabled is True and cfg.watch.retrigger_cooldown_s == 60
+    raw["watch"]["interval_s"] = 5
+    with pytest.raises(ConfigError) as exc:
+        load_config_dict(raw, base_dir=tmp_path)
+    assert "aggressive" in str(exc.value)
+
+
 def test_missing_file_message(tmp_path):
     with pytest.raises(ConfigError) as exc:
         load_config(tmp_path / "nope.toml")

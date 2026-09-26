@@ -125,6 +125,24 @@ class TelemetryConfig:
     verbose: bool = False
 
 
+WATCH_MIN_INTERVAL_S = 10  # anything faster is "aggressive polling"; refused at load time
+
+
+@dataclass(frozen=True)
+class WatchConfig:
+    """Second trigger source: Python re-reads the product page itself while ARMED.
+
+    Off by default. The alert in Discord stays the primary trigger; this only closes the
+    gap between Amazon flipping the listing and the alert being posted. Gentle by design:
+    one page load per ``interval_s`` (jittered), only while armed, never while an attempt
+    is in flight, and it backs off exponentially on any challenge or error.
+    """
+
+    enabled: bool = False
+    interval_s: int = 30
+    retrigger_cooldown_s: int = 120
+
+
 @dataclass(frozen=True)
 class AppConfig:
     paths: PathsConfig
@@ -133,6 +151,7 @@ class AppConfig:
     policy: PurchasePolicy
     checkout: CheckoutConfig = field(default_factory=CheckoutConfig)
     telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
+    watch: WatchConfig = field(default_factory=WatchConfig)
     source_path: Path | None = None
 
 
@@ -180,6 +199,7 @@ def load_config_dict(raw: dict, base_dir: Path, source_path: Path | None = None)
     policy_raw = _section(raw, "policy")
     checkout_raw = raw.get("checkout", {}) or {}
     telemetry_raw = raw.get("telemetry", {}) or {}
+    watch_raw = raw.get("watch", {}) or {}
 
     def resolve(p: str) -> Path:
         path = Path(p)
@@ -283,6 +303,15 @@ def load_config_dict(raw: dict, base_dir: Path, source_path: Path | None = None)
         enabled=_opt(telemetry_raw, "telemetry", "enabled", bool, True),
         verbose=_opt(telemetry_raw, "telemetry", "verbose", bool, False),
     )
+    watch = WatchConfig(
+        enabled=_opt(watch_raw, "watch", "enabled", bool, False),
+        interval_s=_opt(watch_raw, "watch", "interval_s", int, 30),
+        retrigger_cooldown_s=_opt(watch_raw, "watch", "retrigger_cooldown_s", int, 120),
+    )
+    if watch.interval_s < WATCH_MIN_INTERVAL_S:
+        raise ConfigError(f"[watch].interval_s must be >= {WATCH_MIN_INTERVAL_S} (no aggressive polling)")
+    if watch.retrigger_cooldown_s < 0:
+        raise ConfigError("[watch].retrigger_cooldown_s must be >= 0")
     return AppConfig(
         paths=paths,
         bridge=bridge,
@@ -290,6 +319,7 @@ def load_config_dict(raw: dict, base_dir: Path, source_path: Path | None = None)
         policy=policy,
         checkout=checkout,
         telemetry=telemetry,
+        watch=watch,
         source_path=source_path,
     )
 

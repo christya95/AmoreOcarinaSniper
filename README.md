@@ -106,6 +106,24 @@ any field is missing or ambiguous, the attempt stops there. If something goes wr
 the click, the state becomes `UNKNOWN` and the robot refuses to ever click again until you
 have looked.
 
+### 🔭 The product watcher (optional second trigger)
+
+The Discord alert is written by someone else's bot, so there is always a gap between Amazon
+flipping the listing and the alert appearing. With `[watch] enabled = true`, Python also
+re-reads the product page itself on a **second tab** of the same signed-in browser, once
+every `interval_s` seconds (default 30, ±20 % jitter). When that page shows an offer the
+policy would accept, it hands the coordinator a synthetic trigger (`watch-<ms>`) and the
+**exact same** verified checkout runs: re-verify on the main tab → Buy Now → review page →
+policy → intent → Place order. Whichever source fires first wins; the other is skipped as
+*busy* or, after a purchase, *disabled*.
+
+Gentle by construction: it polls only while `ARMED`, never while an attempt is in flight,
+refuses `interval_s < 10`, backs off exponentially on any challenge or error, waits
+`retrigger_cooldown_s` after an attempt it started was refused, and never changes control
+state. Cost: 2–3 signed-in page loads a minute while armed. If Amazon ever answers with a
+CAPTCHA, the watcher just backs off and logs `watch_challenge`; solve it by hand in the
+browser window.
+
 ---
 
 ## 🛡️ Safety rules (enforced in code)
@@ -179,6 +197,9 @@ them in deliberately.**
 | `bridge.allowed_extension_origin` | Optional pin: `chrome-extension://<your extension id>`. |
 | `bridge.message_freshness_s` | Rendered Discord timestamp must be at most this old (default 90). |
 | `checkout.strategy` | `"buy_now"` (default) or `"cart"`. |
+| `watch.enabled` | Default `false`. Poll the product page yourself as a second trigger source (see *The product watcher*). |
+| `watch.interval_s` | Seconds between polls while armed (default 30, ±20 % jitter; values below 10 are refused). |
+| `watch.retrigger_cooldown_s` | After a watcher-started attempt that did not purchase, wait this long before it may trigger again (default 120). |
 | `telemetry.verbose` | Mirror every telemetry event into the console log. Diagnostic only. |
 
 💡 Keep the address and card fragments **short**. Amazon may render "Sycamore Garden" as
@@ -346,15 +367,20 @@ and reported separately.
 The pre‑order window that night lasted **under three minutes** (a human attempt at +3 min found
 it gone). No end‑to‑end purchase latency has been measured yet; none is promised.
 
-`checkout.block_heavy_assets` (images/fonts/media) is off by default. Benchmark with
-`doctor --browser` before enabling; it must not break checkout.
+**Where the time goes and what can be done about it.** Our side (detection, bridge, DOM
+reads, clicks) is a few hundred milliseconds in total; the rest is Amazon serving three pages.
+`checkout.block_heavy_assets` was benchmarked (2026‑09‑25, 16 alternating headless loads):
+1.3 s per product page either way, because verification already stops at `DOMContentLoaded`.
+It stays off. The lever that does matter is *starting earlier*: the optional
+[product watcher](#-the-product-watcher-optional-second-trigger) removes the dependency on
+someone else's alert bot for the first signal.
 
 ---
 
 ## 🧪 Tests
 
 ```powershell
-python -m pytest -q          # 173 tests, ~80 s (headless Chromium for fixture‑driven tests)
+python -m pytest -q          # 185 tests, ~75 s (headless Chromium for fixture‑driven tests)
 ruff check src tests
 ```
 
@@ -431,6 +457,7 @@ extension/                        unpacked MV3 extension
 src/amore_ocarina_sniper/
   config.py  policy.py  models.py store.py  lock.py  killswitch.py
   telemetry.py  bridge.py  coordinator.py  app.py  cli.py
+  watch.py                        optional product-page poller (second trigger source)
   amazon/selectors.py             Amazon selectors with VERIFIED / ASSUMED status
   amazon/extract.py               one‑round‑trip DOM extractor + fail‑closed parsers
   amazon/adapter.py               Playwright flow: product → checkout → confirm; evidence capture
