@@ -56,8 +56,9 @@ class PurchaseAdapter(Protocol):
     dry_run: bool
 
     async def ensure_ready(self) -> None: ...
-    async def verify_offer(self) -> OfferSnapshot: ...
+    async def verify_offer(self, *, reuse_within_s: float = 0.0) -> OfferSnapshot: ...
     async def poll_offer(self) -> OfferSnapshot: ...
+    def promote_watch_page(self) -> bool: ...
     async def prepare_checkout(self, offer: OfferSnapshot) -> CheckoutSnapshot: ...
     async def submit_order(self) -> None: ...
     async def confirm_order(self) -> str | None: ...
@@ -89,6 +90,7 @@ class AmazonAdapter:
         self._last_offer_condition: str | None = None
         self._used_cart_path = False
         self._cart_row_selector = S.CART_PAGE["rows"][-1]
+        self._loaded_at: dict[int, float] = {}  # id(page) -> monotonic time of last product load
         # Rehearsal only (`ocarina doctor --checkout-probe`): when set, a redacted copy of each
         # page the checkout path passes through is written here so selectors can be verified
         # offline. Never set by the runner; off the critical path.
@@ -201,10 +203,33 @@ class AmazonAdapter:
             self._watch_page = await self._context.new_page()
         return await self.verify_offer(page=self._watch_page)
 
-    async def verify_offer(self, page=None) -> OfferSnapshot:
+    def promote_watch_page(self) -> bool:
+        """Make the watcher's tab (product page loaded seconds ago) the main tab.
+
+        Called by the watcher right before it hands a trigger to the coordinator; with
+        ``verify_offer(reuse_within_s=...)`` the attempt then starts from the already
+        rendered page instead of paying for another navigation. The former main tab becomes
+        the watch tab. No-op when there is no live watch tab."""
+        wp = self._watch_page
+        if wp is None or wp.is_closed() or self._page is None or wp is self._page:
+            return False
+        self._page, self._watch_page = wp, self._page
+        return True
+
+    async def verify_offer(self, page=None, *, reuse_within_s: float = 0.0) -> OfferSnapshot:
         cfg = self.config
         page = page or self.page
-        await page.goto(cfg.target.url, wait_until="domcontentloaded")
+        loaded_at = self._loaded_at.get(id(page), 0.0)
+        fresh = (
+            reuse_within_s > 0
+            and page.url.split("?", 1)[0] == cfg.target.url
+            and (time.monotonic() - loaded_at) <= reuse_within_s
+        )
+        if fresh:
+            log.info("verify_offer: reusing page loaded %.1fs ago", time.monotonic() - loaded_at)
+        else:
+            await page.goto(cfg.target.url, wait_until="domcontentloaded")
+            self._loaded_at[id(page)] = time.monotonic()
         readiness = ", ".join(
             [
                 *S.PRODUCT_PAGE["asin"].candidates,

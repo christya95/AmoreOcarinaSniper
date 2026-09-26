@@ -100,6 +100,30 @@ async def test_poll_offer_uses_a_separate_tab(config):
         await adapter.stop()
 
 
+async def test_promoted_watch_page_is_reused_without_navigation(config):
+    """Watcher-triggered attempts start from the tab that already shows the offer."""
+    adapter = await start_adapter(config, Routing())
+    try:
+        await adapter.poll_offer()
+        watch_tab = adapter._watch_page
+        await watch_tab.evaluate("window.__marker = 'still-here'")
+        assert adapter.promote_watch_page() is True
+        assert adapter.page is watch_tab
+        offer = await adapter.verify_offer(reuse_within_s=10)
+        assert offer.asin == "B0HJ6F8L6V" and offer.in_stock
+        # No navigation happened: the JS heap survived and the condition was recorded for checkout.
+        assert await adapter.page.evaluate("window.__marker") == "still-here"
+        assert adapter._last_offer_condition == "new"
+        # Without the reuse window (Discord trigger / retry) the page is reloaded.
+        await adapter.verify_offer()
+        assert await adapter.page.evaluate("window.__marker") is None
+        # Nothing to promote when the watch tab is gone.
+        await adapter._watch_page.close()
+        assert adapter.promote_watch_page() is False
+    finally:
+        await adapter.stop()
+
+
 async def test_offer_unavailable_fails_closed(config):
     adapter = await start_adapter(config, Routing(product="product_unavailable.html"))
     try:

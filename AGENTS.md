@@ -28,7 +28,9 @@ Layout:
 3. **The trigger path cannot arm, disarm, reset, or change policy.** Control is CLI → SQLite.
 4. **Dry-run and DISARMED by default.** `--live` and `ocarina arm` are both required; restarts
    always require re-arming.
-5. **Intent is persisted before the final click.** Ambiguity → `UNKNOWN`, never auto-retry.
+5. **Intent is persisted before the final click.** Ambiguity → `UNKNOWN`, never auto-retry
+   *after* the intent. Before it, timing failures (`unknown_page`, browser `TimeoutError`) may
+   be retried at most `MAX_TRANSIENT_RETRIES` times, each pass re-running full policy.
 6. **No Discord API, bot token, WebSocket interception, OCR, or CAPTCHA/MFA bypass.**
 7. **Never open notification links.** Python navigates to `[target].url` only.
 8. **Never commit** `config.toml`, `secrets/`, `profiles/`, `runtime/`, `artifacts/`.
@@ -261,7 +263,15 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
   (not offered on this account), MFA selectors.
   Fixtures `product_preorder_cart_only.html`, `cart.html` (8 variants); 8 browser tests.
 
+### Rush hardening — 2026-09-25 22:10
+- Coordinator `_run_attempt` split into `_verify_and_prepare` (retry loop, `is_transient`) and
+  `_commit` (unchanged post-intent path). `AttemptOutcome.transient`. Watcher promote/cooldown/
+  back-off changes; adapter `promote_watch_page`, `_loaded_at`, `verify_offer(reuse_within_s)`.
+  226 tests. Host `interval_s = 15`. Runner restarted LIVE.
+
 ### Next up
+- [ ] After the first `watch_trigger` at 15 s cadence: confirm no `watch_challenge` in
+  telemetry; if one appears, set `interval_s` back to 30.
 - [ ] Operator: install ntfy on iPhone, subscribe to the `[notify].ntfy_topic` in `config.toml`,
   run `ocarina notify-test`, confirm the push arrives.
 - [ ] Operator: verify Amazon default address / default payment card; empty the cart.
@@ -298,6 +308,17 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
 
 ## Decision log
 
+- 2026-09-25 22:10 — **Rush hardening**, operator's call after the "what happens when everyone
+  clicks" review. (a) Pre-intent transient failures (`unknown_page`, browser `TimeoutError`)
+  are retried ≤ 2× within the trigger and otherwise return to `ARMED` (push after a streak of
+  3) instead of `NEEDS_ATTENTION`, which was designed for selector drift but under load was
+  the most likely way to lose the whole window; real challenges still stop the bot.
+  (b) Watcher: no re-trigger cooldown after a transient failure; mild (≤ 2×) back-off on
+  timeouts, exponential only on challenges. (c) Watcher promotes its tab before triggering;
+  `verify_offer(reuse_within_s=10)` skips the navigation for that one pass (≈ 2 s).
+  (d) `watch.interval_s` 30 → **15** in the host config; ~200 polls at 30 s had produced no
+  challenge; a CAPTCHA (notified, solved by hand) is the realistic downside, not a ban.
+  Revert any of these independently: constants in `coordinator.py`, `watch.py`, config.
 - 2026-09-25 — **Self-polling enabled (30 s)**, operator's call after the speed review. The
   spec's "avoid aggressive polling" is honoured by a hard ≥ 10 s floor, jitter, armed-only
   operation, back-off on challenges and a re-trigger cooldown. Rationale: the Discord alert

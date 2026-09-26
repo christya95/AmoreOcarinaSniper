@@ -60,8 +60,9 @@ async def test_purchasable_page_triggers_the_normal_attempt_path(config, store):
     watcher, coord, adapter = build(config, store, dry_run=True)
     arm(store)
     assert await watcher.tick() is True
-    # The coordinator re-verified on the main tab and ran the usual dry-run attempt.
-    assert adapter.calls == ["poll_offer", "verify_offer", "prepare_checkout", "abandon"]
+    # The watcher's tab is promoted, then the coordinator re-verifies and runs the usual
+    # dry-run attempt from it.
+    assert adapter.calls == ["poll_offer", "promote_watch_page", "verify_offer", "prepare_checkout", "abandon"]
     events = store.recent_events()
     assert len(events) == 1 and events[0]["channel_id"] == WATCH_CHANNEL_ID
     assert events[0]["event_id"].startswith("watch-")
@@ -83,7 +84,9 @@ async def test_live_purchase_via_watcher_then_stops(config, store):
     assert await watcher.tick() is True
     ctl = store.get_control()
     assert ctl.state == PurchaseState.PURCHASED and ctl.purchase_disabled
-    assert adapter.calls == ["poll_offer", "verify_offer", "prepare_checkout", "submit_order", "confirm_order"]
+    assert adapter.calls == [
+        "poll_offer", "promote_watch_page", "verify_offer", "prepare_checkout", "submit_order", "confirm_order",
+    ]
     # PURCHASED is not ARMED: the watcher goes quiet without touching the browser again.
     assert await watcher.tick() is False
     assert adapter.calls.count("poll_offer") == 1
@@ -95,13 +98,13 @@ async def test_challenge_backs_off_and_changes_no_state(config, store):
     adapter.fail_poll = ChallengeDetected(ChallengeKind.CAPTCHA, "watch tab")
     assert await watcher.tick() is False
     assert await watcher.tick() is False
-    assert watcher._failures == 2
+    assert watcher._challenges == 2
     assert watcher._delay() > 30 * 1.2  # backed off beyond the jittered base interval
     assert store.get_control().state == PurchaseState.ARMED
     adapter.fail_poll = None
     adapter.poll_result = replace(adapter.offer, in_stock=False, buy_now_available=False)
     await watcher.tick()
-    assert watcher._failures == 0
+    assert watcher._challenges == 0
 
 
 async def test_generic_error_is_swallowed(config, store):
@@ -112,13 +115,36 @@ async def test_generic_error_is_swallowed(config, store):
     assert store.get_control().state == PurchaseState.ARMED
 
 
+async def test_timeouts_back_off_mildly_not_exponentially(config, store):
+    """A slow Amazon during a rush must not push the watcher out to minutes."""
+    watcher, _, adapter = build(config, store)
+    arm(store)
+    adapter.fail_poll = ChallengeDetected(ChallengeKind.UNKNOWN_PAGE, "product page did not render")
+    for _ in range(5):
+        assert await watcher.tick() is False
+    assert watcher._failures == 5 and watcher._challenges == 0
+    for _ in range(20):
+        assert watcher._delay() <= 30 * 2 * 1.2
+
+
 async def test_delay_is_jittered_and_capped(config, store):
     watcher, _, _ = build(config, store)
     for _ in range(50):
         assert 30 * 0.8 <= watcher._delay() <= 30 * 1.2
-    watcher._failures = 20
+    watcher._challenges = 20
     assert watcher._delay() <= MAX_BACKOFF_S * 1.2
     assert WATCH_MIN_INTERVAL_S >= 10
+
+
+async def test_transient_attempt_failure_does_not_start_cooldown(config, store):
+    """Timed-out attempt: the very next poll may trigger again (the window is short)."""
+    watcher, _, adapter = build(config, store, dry_run=True, cooldown=3600)
+    arm(store)
+    adapter.fail_prepare = ChallengeDetected(ChallengeKind.UNKNOWN_PAGE, "checkout surface did not appear")
+    assert await watcher.tick() is True
+    assert store.get_control().state == PurchaseState.ARMED
+    assert await watcher.tick() is True  # no cooldown: polled and triggered again
+    assert adapter.calls.count("poll_offer") == 2
 
 
 async def test_skips_while_an_attempt_is_in_flight(config, store):
@@ -127,7 +153,7 @@ async def test_skips_while_an_attempt_is_in_flight(config, store):
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def slow_verify():
+    async def slow_verify(**_kw):
         started.set()
         await release.wait()
         return adapter.offer

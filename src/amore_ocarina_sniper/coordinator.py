@@ -19,6 +19,7 @@ from .config import AppConfig
 from .models import (
     AttemptOutcome,
     ChallengeDetected,
+    ChallengeKind,
     PurchaseState,
     TriggerEvent,
 )
@@ -30,6 +31,25 @@ from .telemetry import Telemetry, Timeline
 log = logging.getLogger("ocarina.coordinator")
 
 MAX_CONSECUTIVE_PRE_INTENT_FAILURES = 3
+# Extra passes over verify → checkout *before* the submission intent when a step timed out
+# (slow page, add-to-cart not registering under load). Nothing has been submitted at that
+# point, so this is not the post-intent "never auto-retry" case; it is bounded, and each pass
+# still runs the full offer + review-page policy.
+MAX_TRANSIENT_RETRIES = 2
+# A watcher-triggered attempt may read the product page the watcher loaded moments ago
+# instead of navigating again (saves one full page load); anything older is reloaded.
+WATCH_PAGE_REUSE_S = 10.0
+# Consecutive transient failures before pushing a heads-up (the bot stays ARMED).
+TRANSIENT_STREAK_NOTIFY = 3
+
+
+def is_transient(exc: BaseException) -> bool:
+    """Timing failures that leave nothing submitted and are worth one more try."""
+    if isinstance(exc, ChallengeDetected):
+        return exc.kind == ChallengeKind.UNKNOWN_PAGE
+    # Playwright's TimeoutError is not the builtin one; match by name to avoid a hard
+    # dependency on the browser library in the state machine.
+    return type(exc).__name__ == "TimeoutError"
 
 
 class PurchaseCoordinator:
@@ -55,6 +75,7 @@ class PurchaseCoordinator:
         self.kill_switch_path = kill_switch_path or config.paths.kill_switch_path
         self._lock = asyncio.Lock()
         self._consecutive_failures = 0
+        self._transient_streak = 0
         self._offer_was_present = False  # set per attempt; drives the "go manual" push
         self.last_outcome: AttemptOutcome | None = None
 
@@ -153,62 +174,102 @@ class PurchaseCoordinator:
     # --------------------------------------------------------------- attempt
     async def _run_attempt(self, event: TriggerEvent, tl: Timeline) -> AttemptOutcome:
         eid = event.event_id
-        policy, target = self.config.policy, self.config.target
-        try:
-            offer = await self.adapter.verify_offer()
-            tl.mark("offer_verified")
-            decision = evaluate_offer(offer, policy, target)
-            self.telemetry.emit(
-                "offer_checked",
-                event_id=eid,
-                ok=decision.ok,
-                reasons=decision.reasons,
-                price=str(offer.price),
-                seller=offer.seller,
-                in_stock=offer.in_stock,
-                is_preorder=offer.is_preorder,
-                offer=asdict(offer),
-            )
-            offer_present = (
-                offer.in_stock or offer.is_preorder or offer.price is not None
-                or offer.buy_now_available or offer.add_to_cart_available
-            )
-            self._offer_was_present = offer_present
-            if not decision.ok:
-                if offer_present:
-                    # The interesting case: there WAS an offer and we still refused. Keep the
-                    # evidence (off the critical path; the attempt is already over).
-                    artifact = await self.adapter.capture_artifact("offer-rejected", html=True)
-                    self.telemetry.emit(
-                        "offer_rejected_with_offer_present", event_id=eid, reasons=decision.reasons,
-                        artifact=artifact,
-                    )
-                return self._finish_pre_intent(
-                    eid, "offer rejected: " + "; ".join(decision.reasons), benign=True
-                )
-
-            snapshot = await self.adapter.prepare_checkout(offer)
-            tl.mark("checkout_prepared")
-            decision = evaluate_checkout(snapshot, policy, target)
-            self.telemetry.emit(
-                "checkout_checked",
-                event_id=eid,
-                ok=decision.ok,
-                reasons=decision.reasons,
-                total=str(snapshot.total),
-                snapshot=asdict(snapshot),
-            )
-            if not decision.ok:
-                # Capture BEFORE abandon() navigates away from the review page.
-                artifact = await self.adapter.capture_artifact("checkout-rejected", html=True)
-                self.telemetry.emit(
-                    "checkout_rejected", event_id=eid, reasons=decision.reasons, artifact=artifact
-                )
+        for attempt in range(1 + MAX_TRANSIENT_RETRIES):
+            try:
+                result = await self._verify_and_prepare(event, tl, attempt)
+            except Exception as exc:  # noqa: BLE001 - pre-intent failures must never leave BUSY states
                 await self._abandon()
-                return self._finish_pre_intent(
-                    eid, "checkout rejected: " + "; ".join(decision.reasons), benign=True
-                )
+                transient = is_transient(exc)
+                if transient and killswitch.is_engaged(self.kill_switch_path):
+                    ctl = self._finish(eid, PurchaseState.DISARMED, "kill switch engaged during retry")
+                    return AttemptOutcome(eid, ctl.state, "kill switch engaged")
+                if transient and attempt < MAX_TRANSIENT_RETRIES:
+                    log.warning("attempt %s: transient failure (%s); retrying (%d left)",
+                                eid, exc, MAX_TRANSIENT_RETRIES - attempt)
+                    self.telemetry.emit("transient_retry", event_id=eid, error=str(exc), pass_no=attempt + 1)
+                    tl.mark(f"retry_{attempt + 1}")
+                    continue
+                if isinstance(exc, ChallengeDetected) and not transient:
+                    kind = exc.kind.value
+                    artifact = await self.adapter.capture_artifact(f"challenge-{kind}")
+                    reason = f"challenge before submission: {exc}"
+                    ctl = self._finish(eid, PurchaseState.NEEDS_ATTENTION, reason)
+                    self.telemetry.emit("challenge", event_id=eid, challenge=kind, artifact=artifact)
+                    return AttemptOutcome(eid, ctl.state, f"needs attention: {exc}")
+                if transient:
+                    artifact = await self.adapter.capture_artifact("transient-failure")
+                    self.telemetry.emit("transient_failure", event_id=eid, error=str(exc), artifact=artifact)
+                    return self._finish_transient(eid, f"transient failure before submission: {exc}")
+                log.exception("pre-intent failure for %s", eid)
+                return self._finish_pre_intent(eid, f"error before submission: {exc!r}", benign=False)
+            if isinstance(result, AttemptOutcome):
+                return result
+            break
+        return await self._commit(eid, tl)
 
+    async def _verify_and_prepare(self, event: TriggerEvent, tl: Timeline, attempt: int):
+        """Offer + review-page policy. Returns an AttemptOutcome (refusal) or None (all passed)."""
+        eid = event.event_id
+        policy, target = self.config.policy, self.config.target
+        reuse = WATCH_PAGE_REUSE_S if (event.source == "watcher" and attempt == 0) else 0.0
+        offer = await self.adapter.verify_offer(reuse_within_s=reuse)
+        tl.mark("offer_verified")
+        decision = evaluate_offer(offer, policy, target)
+        self.telemetry.emit(
+            "offer_checked",
+            event_id=eid,
+            ok=decision.ok,
+            reasons=decision.reasons,
+            price=str(offer.price),
+            seller=offer.seller,
+            in_stock=offer.in_stock,
+            is_preorder=offer.is_preorder,
+            offer=asdict(offer),
+        )
+        offer_present = (
+            offer.in_stock or offer.is_preorder or offer.price is not None
+            or offer.buy_now_available or offer.add_to_cart_available
+        )
+        self._offer_was_present = offer_present
+        if not decision.ok:
+            if offer_present:
+                # The interesting case: there WAS an offer and we still refused. Keep the
+                # evidence (off the critical path; the attempt is already over).
+                artifact = await self.adapter.capture_artifact("offer-rejected", html=True)
+                self.telemetry.emit(
+                    "offer_rejected_with_offer_present", event_id=eid, reasons=decision.reasons,
+                    artifact=artifact,
+                )
+            return self._finish_pre_intent(
+                eid, "offer rejected: " + "; ".join(decision.reasons), benign=True
+            )
+
+        snapshot = await self.adapter.prepare_checkout(offer)
+        tl.mark("checkout_prepared")
+        decision = evaluate_checkout(snapshot, policy, target)
+        self.telemetry.emit(
+            "checkout_checked",
+            event_id=eid,
+            ok=decision.ok,
+            reasons=decision.reasons,
+            total=str(snapshot.total),
+            snapshot=asdict(snapshot),
+        )
+        if not decision.ok:
+            # Capture BEFORE abandon() navigates away from the review page.
+            artifact = await self.adapter.capture_artifact("checkout-rejected", html=True)
+            self.telemetry.emit(
+                "checkout_rejected", event_id=eid, reasons=decision.reasons, artifact=artifact
+            )
+            await self._abandon()
+            return self._finish_pre_intent(
+                eid, "checkout rejected: " + "; ".join(decision.reasons), benign=True
+            )
+        return None
+
+    async def _commit(self, eid: str, tl: Timeline) -> AttemptOutcome:
+        """All checks passed on the review page: persist intent, click once, confirm."""
+        try:
             if not self.store.transition(
                 eid, {PurchaseState.VERIFYING}, PurchaseState.CHECKOUT_READY, "all policy checks passed"
             ):
@@ -219,6 +280,7 @@ class PurchaseCoordinator:
             if self.dry_run:
                 await self._abandon()
                 self._consecutive_failures = 0
+                self._transient_streak = 0
                 ctl = self._finish(
                     eid, PurchaseState.ARMED, "dry-run: all checks passed; submission skipped", dry_run=True
                 )
@@ -233,12 +295,6 @@ class PurchaseCoordinator:
                 await self._abandon()
                 return self._finish_state_changed(eid, "disarmed/expired before submission intent")
             tl.mark("intent_persisted")
-        except ChallengeDetected as exc:
-            await self._abandon()
-            artifact = await self.adapter.capture_artifact(f"challenge-{exc.kind.value}")
-            ctl = self._finish(eid, PurchaseState.NEEDS_ATTENTION, f"challenge before submission: {exc}")
-            self.telemetry.emit("challenge", event_id=eid, challenge=exc.kind.value, artifact=artifact)
-            return AttemptOutcome(eid, ctl.state, f"needs attention: {exc}")
         except Exception as exc:  # noqa: BLE001 - pre-intent failures must never leave BUSY states
             log.exception("pre-intent failure for %s", eid)
             await self._abandon()
@@ -282,10 +338,25 @@ class PurchaseCoordinator:
         except Exception as exc:  # noqa: BLE001
             log.warning("abandon failed: %s", exc)
 
+    def _finish_transient(self, eid: str, reason: str) -> AttemptOutcome:
+        """Timed out before anything was submitted. Under a rush this is the *expected* failure,
+        so the bot stays ARMED for the next trigger; a streak only earns the operator a push."""
+        self._transient_streak += 1
+        if self._transient_streak == TRANSIENT_STREAK_NOTIFY:
+            self.notifier.fire(
+                f"{self._transient_streak} attempts timed out in a row",
+                f"{reason}. Amazon may be overloaded or the page changed; the bot stays armed.",
+                priority=PRIORITY_HIGH,
+                tags="hourglass",
+            )
+        ctl = self._finish(eid, PurchaseState.ARMED, reason)
+        return AttemptOutcome(eid, ctl.state, reason, transient=True)
+
     def _finish_pre_intent(self, eid: str, reason: str, *, benign: bool) -> AttemptOutcome:
         """Nothing was submitted. Stay ARMED unless failures pile up (selector drift etc.)."""
         if benign:
             self._consecutive_failures = 0
+            self._transient_streak = 0
             ctl = self._finish(eid, PurchaseState.ARMED, reason)
             return AttemptOutcome(eid, ctl.state, reason)
         self._consecutive_failures += 1

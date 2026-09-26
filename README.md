@@ -113,18 +113,34 @@ have looked.
 The Discord alert is written by someone else's bot, so there is always a gap between Amazon
 flipping the listing and the alert appearing. With `[watch] enabled = true`, Python also
 re-reads the product page itself on a **second tab** of the same signed-in browser, once
-every `interval_s` seconds (default 30, ±20 % jitter). When that page shows an offer the
-policy would accept, it hands the coordinator a synthetic trigger (`watch-<ms>`) and the
-**exact same** verified checkout runs: re-verify on the main tab → Buy Now → review page →
-policy → intent → Place order. Whichever source fires first wins; the other is skipped as
-*busy* or, after a purchase, *disabled*.
+every `interval_s` seconds (default 30, the host runs 15, ±20 % jitter). When that page shows
+an offer the policy would accept, it hands the coordinator a synthetic trigger (`watch-<ms>`)
+and **promotes its own tab to be the main tab**, so the attempt starts from the page that is
+already rendered instead of loading it again (≈ 2 s saved; the coordinator still re‑reads and
+re‑evaluates the offer from that DOM, and anything older than 10 s is reloaded). Then the
+**exact same** verified checkout runs: verify → Pre‑order now → cart → review page → policy →
+intent → Place order. Whichever source fires first wins; the other is skipped as *busy* or,
+after a purchase, *disabled*.
 
 Gentle by construction: it polls only while `ARMED`, never while an attempt is in flight,
-refuses `interval_s < 10`, backs off exponentially on any challenge or error, waits
-`retrigger_cooldown_s` after an attempt it started was refused, and never changes control
-state. Cost: 2–3 signed-in page loads a minute while armed. If Amazon ever answers with a
-CAPTCHA, the watcher just backs off and logs `watch_challenge`; solve it by hand in the
-browser window.
+refuses `interval_s < 10`, backs off exponentially on a CAPTCHA/login challenge (mildly — at
+most 2× — on a plain timeout, because a slow Amazon during a rush is exactly when polling
+matters), waits `retrigger_cooldown_s` after an attempt it started was **refused by policy**
+(not after a timeout), and never changes control state. Cost: 2–4 signed‑in page loads a
+minute while armed. If Amazon ever answers with a CAPTCHA, the watcher backs off, logs
+`watch_challenge` and pushes your phone; solve it by hand in the browser window.
+
+### Rush conditions: what is retried and what is not
+
+Before the submission intent is persisted nothing has been bought, so timing failures there
+are retried, bounded: a step that times out (product page not rendering, add‑to‑cart not
+registering, cart rows or the review page not appearing — `unknown_page`, or a browser
+`TimeoutError`) is retried up to **2** more times within the same trigger, each pass running
+the full offer + review‑page policy again. If all passes fail the bot stays **`ARMED`** for the
+next trigger (and pushes a heads‑up after 3 such triggers in a row) instead of parking itself
+in `NEEDS_ATTENTION`. Real challenges (CAPTCHA, login, MFA, payment verification) are never
+retried and still go to `NEEDS_ATTENTION`. **After** the intent is persisted nothing is ever
+retried: one click, then `PURCHASED` or `UNKNOWN`.
 
 ---
 
@@ -201,7 +217,7 @@ them in deliberately.**
 | `checkout.strategy` | `"buy_now"` (default) or `"cart"`. |
 | `watch.enabled` | Default `false`. Poll the product page yourself as a second trigger source (see *The product watcher*). |
 | `watch.interval_s` | Seconds between polls while armed (default 30, ±20 % jitter; values below 10 are refused). |
-| `watch.retrigger_cooldown_s` | After a watcher-started attempt that did not purchase, wait this long before it may trigger again (default 120). |
+| `watch.retrigger_cooldown_s` | After a watcher-started attempt that policy **refused**, wait this long before it may trigger again (default 120). Not applied after a transient timeout. |
 | `notify.ntfy_topic` | Empty = off. A long random topic name you also subscribe to in the ntfy phone app. Pushes on ORDER PLACED, stock‑seen‑but‑REFUSED, NEEDS_ATTENTION/UNKNOWN, first watch‑tab challenge, runner start. |
 | `telemetry.verbose` | Mirror every telemetry event into the console log. Diagnostic only. |
 
@@ -349,7 +365,8 @@ happen.
 | You are also watching with a phone stock app (HotStock etc.) | The robot cannot see your manual orders. Two orders are possible if you both buy in the same minute. | **Rule: robot first.** When your phone alerts, wait for the push: *ORDER PLACED* → do nothing; *REFUSED — buy manually* → go; no push within ~10 s → check `ocarina status`, then go manual. If you do buy manually, run `ocarina kill` immediately. |
 | Pre‑order button reads “Pre‑order now” | Same `#buy-now-button` / `#add-to-cart-button` ids; handled. Price/seller/condition still verified. | Keep `policy.allow_preorder = true`. |
 | Product page shows a variant/edition picker | Refused (`variant selector present`). | Nothing; the alert‑matched ASIN is a single edition. |
-| Review‑page selectors are wrong (never live‑verified) | `checkout surface did not appear` or unreadable fields → refused/`NEEDS_ATTENTION` with screenshot + all‑frame HTML in `runtime/artifacts/`. | Send the artifacts here; fixing a selector takes minutes. |
+| Amazon is slow or the add‑to‑cart fails during the rush | Step times out → retried up to 2× within the same trigger; if still failing, back to `ARMED` (`transient failure before submission`) with screenshot; the watcher polls again on its next tick with no cooldown. Push to your phone after 3 such triggers in a row. | If stock is visibly there and the push says *REFUSED — buy manually*, go manual. |
+| Review‑page selectors drift (Amazon layout change) | Unreadable field → refused with screenshot + all‑frame HTML in `runtime/artifacts/`; the bot stays armed. | Send the artifacts here; fixing a selector takes minutes. Re‑run the rehearsal (`--probe-asin`). |
 
 ---
 
@@ -414,7 +431,7 @@ someone else's alert bot for the first signal.
 ## 🧪 Tests
 
 ```powershell
-python -m pytest -q          # 218 tests, ~90 s (headless Chromium for fixture‑driven tests)
+python -m pytest -q          # 226 tests, ~90 s (headless Chromium for fixture‑driven tests)
 ruff check src tests
 ```
 

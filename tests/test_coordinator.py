@@ -10,7 +10,11 @@ import pytest
 
 from amore_ocarina_sniper import killswitch
 from amore_ocarina_sniper.amazon.adapter import DryRunRefusal
-from amore_ocarina_sniper.coordinator import MAX_CONSECUTIVE_PRE_INTENT_FAILURES, PurchaseCoordinator
+from amore_ocarina_sniper.coordinator import (
+    MAX_CONSECUTIVE_PRE_INTENT_FAILURES,
+    MAX_TRANSIENT_RETRIES,
+    PurchaseCoordinator,
+)
 from amore_ocarina_sniper.models import ChallengeDetected, ChallengeKind, PurchaseState, TriggerEvent
 from amore_ocarina_sniper.telemetry import Telemetry
 
@@ -33,12 +37,20 @@ class FakeAdapter:
         self.calls: list[str] = []
         self.submit_delay = 0.0
         self.on_submit = None
+        # Scripted transient failures: pop one exception per prepare_checkout call.
+        self.prepare_failures: list[Exception] = []
+        self.reuse_requests: list[float] = []
 
     async def ensure_ready(self):
         self.calls.append("ensure_ready")
 
-    async def verify_offer(self):
+    def promote_watch_page(self):
+        self.calls.append("promote_watch_page")
+        return True
+
+    async def verify_offer(self, *, reuse_within_s: float = 0.0):
         self.calls.append("verify_offer")
+        self.reuse_requests.append(reuse_within_s)
         if self.fail_verify:
             raise self.fail_verify
         return self.offer
@@ -51,6 +63,8 @@ class FakeAdapter:
 
     async def prepare_checkout(self, offer):
         self.calls.append("prepare_checkout")
+        if self.prepare_failures:
+            raise self.prepare_failures.pop(0)
         if self.fail_prepare:
             raise self.fail_prepare
         return self.checkout
@@ -205,6 +219,68 @@ async def test_crash_before_intent_returns_to_armed_then_needs_attention(live):
     out = await coord.handle_trigger(event(99))
     assert out.final_state == PurchaseState.NEEDS_ATTENTION
     assert "submit_order" not in adapter.calls
+
+
+async def test_transient_timeout_is_retried_then_purchases(live):
+    """Slow cart page under load: the attempt retries before intent and still buys once."""
+    coord, adapter, store = live
+    adapter.prepare_failures = [ChallengeDetected(ChallengeKind.UNKNOWN_PAGE, "checkout surface did not appear")]
+    arm(store)
+    out = await coord.handle_trigger(event())
+    assert out.final_state == PurchaseState.PURCHASED
+    assert adapter.calls.count("prepare_checkout") == 2
+    assert adapter.calls.count("submit_order") == 1
+    # The retry re-verifies the offer from a fresh navigation (no page reuse on retries).
+    assert adapter.reuse_requests == [0.0, 0.0]
+
+
+async def test_transient_failures_exhaust_retries_but_stay_armed(live):
+    coord, adapter, store = live
+    adapter.fail_prepare = ChallengeDetected(ChallengeKind.UNKNOWN_PAGE, "target item not in cart")
+    arm(store)
+    for i in range(MAX_CONSECUTIVE_PRE_INTENT_FAILURES + 2):
+        out = await coord.handle_trigger(event(i + 1))
+        assert out.final_state == PurchaseState.ARMED, out.reason
+        assert out.transient
+    # 1 + MAX_TRANSIENT_RETRIES passes per trigger, never NEEDS_ATTENTION, nothing submitted.
+    assert adapter.calls.count("prepare_checkout") == (MAX_CONSECUTIVE_PRE_INTENT_FAILURES + 2) * (
+        1 + MAX_TRANSIENT_RETRIES
+    )
+    assert "submit_order" not in adapter.calls
+    assert store.get_control().state == PurchaseState.ARMED
+
+
+async def test_playwright_style_timeout_counts_as_transient(live):
+    coord, adapter, store = live
+
+    class TimeoutError(Exception):  # noqa: A001 - mimics playwright's TimeoutError by name
+        pass
+
+    adapter.prepare_failures = [TimeoutError("goto exceeded 15000ms")]
+    arm(store)
+    out = await coord.handle_trigger(event())
+    assert out.final_state == PurchaseState.PURCHASED
+    assert adapter.calls.count("prepare_checkout") == 2
+
+
+async def test_captcha_is_not_retried(live):
+    coord, adapter, store = live
+    adapter.prepare_failures = [ChallengeDetected(ChallengeKind.CAPTCHA, "robot check")]
+    arm(store)
+    out = await coord.handle_trigger(event())
+    assert out.final_state == PurchaseState.NEEDS_ATTENTION
+    assert adapter.calls.count("prepare_checkout") == 1
+
+
+async def test_watch_trigger_may_reuse_fresh_page(live):
+    from amore_ocarina_sniper.coordinator import WATCH_PAGE_REUSE_S
+    from amore_ocarina_sniper.watch import make_watch_event
+
+    coord, adapter, store = live
+    arm(store)
+    out = await coord.handle_trigger(make_watch_event(TARGET_ID))
+    assert out.final_state == PurchaseState.PURCHASED
+    assert adapter.reuse_requests == [WATCH_PAGE_REUSE_S]
 
 
 async def test_crash_after_submit_is_unknown_and_never_retried(live):

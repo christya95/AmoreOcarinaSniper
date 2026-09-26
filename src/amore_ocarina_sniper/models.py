@@ -140,3 +140,6 @@ class AttemptOutcome:
     reason: str
     order_id: str | None = None
     dry_run: bool = False
+    # Nothing was submitted and the failure was a page/network timing problem rather than a
+    # policy refusal: the same offer may well succeed seconds later (rush conditions).
+    transient: bool = False
