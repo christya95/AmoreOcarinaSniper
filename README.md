@@ -458,7 +458,8 @@ order can be placed. Coverage highlights:
 | Add‑to‑cart confirmation: button class `attach-dss-atc` adds via AJAX and opens `#attach-desktop-sideSheet[aria-modal]` with a **warranty upsell** (`#attach-warranty-pane`, *Add coverage* / *No thanks*) behind `#attach-popover-lgtbox`; no *Proceed to checkout* offered there | ✅ rehearsed 2026‑09‑25 21:47 in the bot's own profile | Detected as *visible surface* in 0.30 s. Before the fix none of the assumed ids existed and the bot waited out the full element timeout (review page at 11.4 s → now 3.0 s). The cart page follows; the upsell is never clicked. |
 | Side‑sheet *Proceed to checkout* (`#attach-sidesheet-checkout-button`) fast path | ⚠️ assumed / not offered | Kept as an opportunistic candidate; the verified path is via the cart page. |
 | Review‑page CVV / card‑input prompt (`payment_input`) | ⚠️ assumed (observed **absent** 2026‑09‑25 for the saved Visa) | Visibility‑checked only, so a wrong guess can never block a normal checkout; it can only miss a prompt (which then ends in `UNKNOWN` as before). |
-| Order‑history layout (`reconcile`), MFA selectors | ⚠️ assumed | |
+| Order history for `reconcile`: `/gp/css/order-history` (redirects to *Your Orders*), order ids `\d{3}-\d{7}-\d{7}` in *Order #* cards | ✅ live 2026‑09‑25 21:53 | Operator's signed‑in page: 10 order cards, 11 ids, all matching. `reconcile` reads page text only — no selectors. |
+| MFA selectors | ⚠️ assumed | Only ever pause the bot; never bypassed. |
 | Does the pre‑order page show *Buy Now* at all? | ❓ operator says **no** (2026‑09‑25) | Only *Pre‑order now* (add‑to‑cart slot). The adapter takes the cart path automatically whenever Buy Now is absent; the cart is tidied to the single target unit first. |
 
 `ocarina doctor` prints the live selector table with each field's status.

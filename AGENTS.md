@@ -254,8 +254,11 @@ Add new items at the top of *Next up*. Move to *Done* with the commit hash.
   before failing closed on "target missing".
 - Run 3: acknowledged via surface in 0.30 s; review page in **3.02 s**; every field matched its
   verified selector; policy refused only on the expected ASIN/title/seller. Runner relaunched
-  LIVE 21:49, armed until 09:49. Still ASSUMED: confirmation (thank-you) markers, side-sheet
-  Proceed button (not offered), order-history URL.
+  LIVE 21:49, armed until 09:49.
+- 21:53 operator's order-history page: `/gp/css/order-history` redirects to *Your Orders*,
+  ids match `ORDER_ID_PATTERN` → VERIFIED. Still ASSUMED: confirmation (thank-you) markers
+  and order-id location on it (only observable on a real order), side-sheet Proceed button
+  (not offered on this account), MFA selectors.
   Fixtures `product_preorder_cart_only.html`, `cart.html` (8 variants); 8 browser tests.
 
 ### Next up

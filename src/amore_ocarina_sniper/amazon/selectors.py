@@ -408,7 +408,10 @@ CHALLENGES = {
     "signed_out_nav_text": ("hello, sign in",),
 }  # captcha/login/signed-out markers VERIFIED as text observed on amazon.ca; others ASSUMED
 
-ORDER_HISTORY_URL = "https://www.amazon.ca/gp/css/order-history"  # ASSUMED
+# VERIFIED 2026-09-25 21:53 (operator's signed-in page): the URL redirects to the current
+# Your Orders page, which lists "Order #" cards (`.yohtmlc-order-id`) whose ids all match the
+# pattern; the same 3-7-7 shape appears as the purchase id in review-page URLs.
+ORDER_HISTORY_URL = "https://www.amazon.ca/gp/css/order-history"
 ORDER_ID_PATTERN = r"\b\d{3}-\d{7}-\d{7}\b"
 
 
